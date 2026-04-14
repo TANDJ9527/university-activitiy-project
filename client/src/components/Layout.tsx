@@ -54,6 +54,19 @@ export function Layout() {
               >
                 搜索与筛选
               </NavLink>
+              <NavLink
+                to="/comments"
+                className={({ isActive }) =>
+                  [
+                    'rounded-full px-4 py-2 text-sm font-medium no-underline transition',
+                    isActive
+                      ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/80'
+                      : 'text-slate-600 hover:bg-white/90 hover:text-slate-900 hover:shadow-sm',
+                  ].join(' ')
+                }
+              >
+                评论
+              </NavLink>
               {ready && user ? (
                 <>
                   <div className="hidden items-center gap-2 rounded-full border border-slate-200/80 bg-white/60 px-3 py-1.5 sm:flex">

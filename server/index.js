@@ -3,7 +3,7 @@ import cors from "cors";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
-import { pool, ensureSchema, mapActivityRow } from "./db.js";
+import { db, ensureSchema, mapActivityRow } from "./db.js";
 
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
@@ -14,25 +14,19 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: "1mb" }));
 
 async function userPublicFields(userId, email, displayName, role) {
-  const [pa] = await pool.execute(
-    "SELECT 1 AS ok FROM platform_admins WHERE user_id = ? LIMIT 1",
-    [userId]
-  );
+  const pa = db.data.platform_admins.find((admin) => admin.user_id === userId);
   return {
     id: userId,
     email,
     displayName,
     role,
-    isPlatformAdmin: pa.length > 0,
+    isPlatformAdmin: !!pa,
   };
 }
 
 async function isPlatformAdmin(userId) {
-  const [pa] = await pool.execute(
-    "SELECT 1 AS ok FROM platform_admins WHERE user_id = ? LIMIT 1",
-    [userId]
-  );
-  return pa.length > 0;
+  const pa = db.data.platform_admins.find((admin) => admin.user_id === userId);
+  return !!pa;
 }
 
 function signUserToken(user) {
@@ -69,7 +63,7 @@ function authMiddleware(required) {
 
 app.get("/api/health", async (_req, res) => {
   try {
-    await pool.query("SELECT 1");
+    await db.read();
     res.json({ ok: true, db: true });
   } catch {
     res.json({ ok: true, db: false });
@@ -77,10 +71,9 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.post("/api/auth/register", async (req, res) => {
+  await db.read();
   const body = req.body || {};
-  const email = String(body.email || "")
-    .trim()
-    .toLowerCase();
+  const email = String(body.email || "").trim().toLowerCase();
   const password = String(body.password || "");
   const displayName = String(body.displayName || "").trim();
   const roleRaw = String(body.role || "student").toLowerCase();
@@ -94,17 +87,27 @@ app.post("/api/auth/register", async (req, res) => {
     return res.status(400).json({ error: "请填写昵称（不超过 100 字）" });
   }
 
+  // 检查邮箱是否已存在
+  const existingUser = db.data.users.find((user) => user.email === email);
+  if (existingUser) {
+    return res.status(409).json({ error: "该邮箱已注册" });
+  }
+
   const id = randomUUID();
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+  const now = new Date().toISOString();
+
   try {
-    await pool.execute(
-      "INSERT INTO users (id, email, password_hash, display_name, role) VALUES (?, ?, ?, ?, ?)",
-      [id, email, passwordHash, displayName, role]
-    );
+    db.data.users.push({
+      id,
+      email,
+      password_hash: passwordHash,
+      display_name: displayName,
+      role,
+      created_at: now,
+    });
+    await db.write();
   } catch (e) {
-    if (e.code === "ER_DUP_ENTRY") {
-      return res.status(409).json({ error: "该邮箱已注册" });
-    }
     console.error(e);
     return res.status(500).json({ error: "注册失败" });
   }
@@ -115,100 +118,94 @@ app.post("/api/auth/register", async (req, res) => {
 });
 
 app.post("/api/auth/login", async (req, res) => {
-  const email = String(req.body?.email || "")
-    .trim()
-    .toLowerCase();
+  await db.read();
+  const email = String(req.body?.email || "").trim().toLowerCase();
   const password = String(req.body?.password || "");
   if (!email || !password) {
     return res.status(400).json({ error: "请填写邮箱和密码" });
   }
 
-  const [rows] = await pool.execute(
-    "SELECT id, email, password_hash AS passwordHash, display_name AS displayName, role FROM users WHERE email = ? LIMIT 1",
-    [email]
-  );
-  const row = rows[0];
-  if (!row) return res.status(401).json({ error: "邮箱或密码错误" });
+  const user = db.data.users.find((user) => user.email === email);
+  if (!user) return res.status(401).json({ error: "邮箱或密码错误" });
 
-  const ok = await bcrypt.compare(password, row.passwordHash);
+  const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: "邮箱或密码错误" });
 
-  const user = await userPublicFields(row.id, row.email, row.displayName, row.role);
-  res.json({ token: signUserToken(user), user });
+  const userPublic = await userPublicFields(user.id, user.email, user.display_name, user.role);
+  res.json({ token: signUserToken(userPublic), user: userPublic });
 });
 
 app.get("/api/auth/me", authMiddleware(true), async (req, res) => {
-  const [rows] = await pool.execute(
-    "SELECT id, email, display_name AS displayName, role FROM users WHERE id = ? LIMIT 1",
-    [req.user.id]
-  );
-  const row = rows[0];
-  if (!row) return res.status(404).json({ error: "用户不存在" });
-  const user = await userPublicFields(row.id, row.email, row.displayName, row.role);
-  res.json({ user });
+  await db.read();
+  const user = db.data.users.find((user) => user.id === req.user.id);
+  if (!user) return res.status(404).json({ error: "用户不存在" });
+  const userPublic = await userPublicFields(user.id, user.email, user.display_name, user.role);
+  res.json({ user: userPublic });
 });
 
 app.get("/api/activities", async (req, res) => {
+  await db.read();
   const { q, category, sort, publisher } = req.query;
-  let sql = `
-    SELECT a.id, a.user_id, a.publisher_role, a.title, a.description, a.location, a.organizer, a.contact,
-           a.category, a.start_at, a.end_at, a.created_at, a.updated_at,
-           u.display_name AS author_display_name, u.role AS author_role
-    FROM activities a
-    JOIN users u ON u.id = a.user_id
-    WHERE 1=1
-  `;
-  const params = [];
 
+  let activities = db.data.activities.map((activity) => {
+    const author = db.data.users.find((user) => user.id === activity.user_id);
+    return {
+      ...activity,
+      author_display_name: author?.display_name,
+      author_role: author?.role,
+    };
+  });
+
+  // 过滤
   if (typeof q === "string" && q.trim()) {
-    const s = `%${q.trim()}%`;
-    sql += ` AND (
-      a.title LIKE ? OR a.description LIKE ? OR a.location LIKE ? OR a.organizer LIKE ?
-    )`;
-    params.push(s, s, s, s);
+    const searchTerm = q.trim().toLowerCase();
+    activities = activities.filter((activity) => {
+      return (
+        activity.title.toLowerCase().includes(searchTerm) ||
+        activity.description.toLowerCase().includes(searchTerm) ||
+        activity.location.toLowerCase().includes(searchTerm) ||
+        activity.organizer.toLowerCase().includes(searchTerm)
+      );
+    });
   }
   if (typeof category === "string" && category && category !== "all") {
-    sql += ` AND a.category = ?`;
-    params.push(category);
+    activities = activities.filter((activity) => activity.category === category);
   }
   if (publisher === "student" || publisher === "school") {
-    sql += ` AND a.publisher_role = ?`;
-    params.push(publisher);
+    activities = activities.filter((activity) => activity.publisher_role === publisher);
   }
 
+  // 排序
   if (sort === "startAsc") {
-    sql += ` ORDER BY a.start_at ASC`;
+    activities.sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
   } else if (sort === "startDesc") {
-    sql += ` ORDER BY a.start_at DESC`;
+    activities.sort((a, b) => new Date(b.start_at) - new Date(a.start_at));
   } else {
-    sql += ` ORDER BY a.created_at DESC`;
+    activities.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   }
 
-  try {
-    const [rows] = await pool.execute(sql, params);
-    res.json({ activities: rows.map(mapActivityRow) });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "读取活动列表失败" });
-  }
+  const mappedActivities = activities.map(mapActivityRow);
+  res.json({ activities: mappedActivities });
 });
 
 app.get("/api/activities/:id", async (req, res) => {
-  const [rows] = await pool.execute(
-    `SELECT a.id, a.user_id, a.publisher_role, a.title, a.description, a.location, a.organizer, a.contact,
-            a.category, a.start_at, a.end_at, a.created_at, a.updated_at,
-            u.display_name AS author_display_name, u.role AS author_role
-     FROM activities a
-     JOIN users u ON u.id = a.user_id
-     WHERE a.id = ? LIMIT 1`,
-    [req.params.id]
-  );
-  const row = rows[0];
-  if (!row) return res.status(404).json({ error: "未找到活动" });
-  res.json(mapActivityRow(row));
+  await db.read();
+  const activity = db.data.activities.find((activity) => activity.id === req.params.id);
+  if (!activity) return res.status(404).json({ error: "未找到活动" });
+
+  const author = db.data.users.find((user) => user.id === activity.user_id);
+  const activityWithAuthor = {
+    ...activity,
+    author_display_name: author?.display_name,
+    author_role: author?.role,
+  };
+
+  const mappedActivity = mapActivityRow(activityWithAuthor);
+  res.json(mappedActivity);
 });
 
 app.post("/api/activities", authMiddleware(true), async (req, res) => {
+  await db.read();
   const body = req.body || {};
   const title = String(body.title || "").trim();
   const description = String(body.description || "").trim();
@@ -241,49 +238,46 @@ app.post("/api/activities", authMiddleware(true), async (req, res) => {
   const id = randomUUID();
   const uid = req.user.id;
   const publisherRole = req.user.role === "school" ? "school" : "student";
+  const now = new Date().toISOString();
 
   try {
-    await pool.execute(
-      `INSERT INTO activities
-        (id, user_id, publisher_role, title, description, location, organizer, contact, category, start_at, end_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        uid,
-        publisherRole,
-        title,
-        description,
-        location,
-        organizer,
-        contact,
-        category,
-        start,
-        end,
-      ]
-    );
+    const newActivity = {
+      id,
+      user_id: uid,
+      publisher_role: publisherRole,
+      title,
+      description,
+      location,
+      organizer,
+      contact,
+      category,
+      start_at: start.toISOString(),
+      end_at: end ? end.toISOString() : null,
+      created_at: now,
+      updated_at: now,
+    };
+
+    db.data.activities.push(newActivity);
+    await db.write();
+
+    const author = db.data.users.find((user) => user.id === uid);
+    const activityWithAuthor = {
+      ...newActivity,
+      author_display_name: author?.display_name,
+      author_role: author?.role,
+    };
+
+    const mappedActivity = mapActivityRow(activityWithAuthor);
+    res.status(201).json({ activity: mappedActivity });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "发布失败" });
   }
-
-  const [rows] = await pool.execute(
-    `SELECT a.id, a.user_id, a.publisher_role, a.title, a.description, a.location, a.organizer, a.contact,
-            a.category, a.start_at, a.end_at, a.created_at, a.updated_at,
-            u.display_name AS author_display_name, u.role AS author_role
-     FROM activities a
-     JOIN users u ON u.id = a.user_id
-     WHERE a.id = ? LIMIT 1`,
-    [id]
-  );
-  res.status(201).json({ activity: mapActivityRow(rows[0]) });
 });
 
 app.put("/api/activities/:id", authMiddleware(true), async (req, res) => {
-  const [existingRows] = await pool.execute(
-    "SELECT id, user_id FROM activities WHERE id = ? LIMIT 1",
-    [req.params.id]
-  );
-  const existing = existingRows[0];
+  await db.read();
+  const existing = db.data.activities.find((activity) => activity.id === req.params.id);
   if (!existing) return res.status(404).json({ error: "未找到活动" });
 
   const admin = await isPlatformAdmin(req.user.id);
@@ -292,21 +286,14 @@ app.put("/api/activities/:id", authMiddleware(true), async (req, res) => {
   }
 
   const body = req.body || {};
-  const [curRows] = await pool.execute(
-    `SELECT title, description, location, organizer, contact, category, start_at, end_at
-     FROM activities WHERE id = ? LIMIT 1`,
-    [req.params.id]
-  );
-  const cur = curRows[0];
-  const title = body.title !== undefined ? String(body.title).trim() : cur.title;
-  const description =
-    body.description !== undefined ? String(body.description).trim() : cur.description;
-  const location = body.location !== undefined ? String(body.location).trim() : cur.location;
-  const organizer = body.organizer !== undefined ? String(body.organizer).trim() : cur.organizer;
-  const contact = body.contact !== undefined ? String(body.contact).trim() : cur.contact;
-  const category = body.category !== undefined ? String(body.category).trim() : cur.category;
-  const startAt = body.startAt !== undefined ? body.startAt : cur.start_at;
-  const endAt = body.endAt !== undefined ? body.endAt : cur.end_at;
+  const title = body.title !== undefined ? String(body.title).trim() : existing.title;
+  const description = body.description !== undefined ? String(body.description).trim() : existing.description;
+  const location = body.location !== undefined ? String(body.location).trim() : existing.location;
+  const organizer = body.organizer !== undefined ? String(body.organizer).trim() : existing.organizer;
+  const contact = body.contact !== undefined ? String(body.contact).trim() : existing.contact;
+  const category = body.category !== undefined ? String(body.category).trim() : existing.category;
+  const startAt = body.startAt !== undefined ? body.startAt : existing.start_at;
+  const endAt = body.endAt !== undefined ? body.endAt : existing.end_at;
 
   if (!title || title.length > 120) {
     return res.status(400).json({ error: "标题必填且不超过 120 字" });
@@ -326,32 +313,38 @@ app.put("/api/activities/:id", authMiddleware(true), async (req, res) => {
     }
   }
 
-  await pool.execute(
-    `UPDATE activities SET
-      title = ?, description = ?, location = ?, organizer = ?, contact = ?, category = ?,
-      start_at = ?, end_at = ?
-     WHERE id = ?`,
-    [title, description, location, organizer, contact, category, start, end, req.params.id]
-  );
+  try {
+    Object.assign(existing, {
+      title,
+      description,
+      location,
+      organizer,
+      contact,
+      category,
+      start_at: start.toISOString(),
+      end_at: end ? end.toISOString() : null,
+      updated_at: new Date().toISOString(),
+    });
+    await db.write();
 
-  const [rows] = await pool.execute(
-    `SELECT a.id, a.user_id, a.publisher_role, a.title, a.description, a.location, a.organizer, a.contact,
-            a.category, a.start_at, a.end_at, a.created_at, a.updated_at,
-            u.display_name AS author_display_name, u.role AS author_role
-     FROM activities a
-     JOIN users u ON u.id = a.user_id
-     WHERE a.id = ? LIMIT 1`,
-    [req.params.id]
-  );
-  res.json({ activity: mapActivityRow(rows[0]) });
+    const author = db.data.users.find((user) => user.id === existing.user_id);
+    const activityWithAuthor = {
+      ...existing,
+      author_display_name: author?.display_name,
+      author_role: author?.role,
+    };
+
+    const mappedActivity = mapActivityRow(activityWithAuthor);
+    res.json({ activity: mappedActivity });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "修改失败" });
+  }
 });
 
 app.delete("/api/activities/:id", authMiddleware(true), async (req, res) => {
-  const [existingRows] = await pool.execute(
-    "SELECT user_id FROM activities WHERE id = ? LIMIT 1",
-    [req.params.id]
-  );
-  const existing = existingRows[0];
+  await db.read();
+  const existing = db.data.activities.find((activity) => activity.id === req.params.id);
   if (!existing) return res.status(404).json({ error: "未找到活动" });
 
   const admin = await isPlatformAdmin(req.user.id);
@@ -359,8 +352,14 @@ app.delete("/api/activities/:id", authMiddleware(true), async (req, res) => {
     return res.status(403).json({ error: "只有发布者或平台管理员可以删除该活动" });
   }
 
-  await pool.execute("DELETE FROM activities WHERE id = ?", [req.params.id]);
-  res.status(204).send();
+  try {
+    db.data.activities = db.data.activities.filter((activity) => activity.id !== req.params.id);
+    await db.write();
+    res.status(204).send();
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "删除失败" });
+  }
 });
 
 async function start() {

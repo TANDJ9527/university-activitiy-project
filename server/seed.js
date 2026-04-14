@@ -1,9 +1,9 @@
 /**
- * 向 MySQL 写入演示用户与活动。可重复执行：会先删除固定 ID 的演示活动再插入。
+ * 向 JSON 文件写入演示用户与活动。可重复执行：会先删除固定 ID 的演示活动再插入。
  * 运行：cd server && npm run seed
  */
 import bcrypt from "bcrypt";
-import { pool, ensureSchema } from "./db.js";
+import { db, ensureSchema } from "./db.js";
 
 const SALT = 10;
 
@@ -178,50 +178,69 @@ const SEED_ACTIVITIES = [
 
 async function main() {
   await ensureSchema();
+  await db.read();
 
+  const now = new Date().toISOString();
+
+  // 插入或更新用户
   for (const u of SEED_USERS) {
     const hash = await bcrypt.hash(u.password, SALT);
-    await pool.execute(
-      `INSERT INTO users (id, email, password_hash, display_name, role)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE
-         password_hash = VALUES(password_hash),
-         display_name = VALUES(display_name),
-         role = VALUES(role)`,
-      [u.id, u.email, hash, u.displayName, u.role]
-    );
+    const existingUser = db.data.users.find((user) => user.id === u.id);
+    if (existingUser) {
+      Object.assign(existingUser, {
+        email: u.email,
+        password_hash: hash,
+        display_name: u.displayName,
+        role: u.role,
+      });
+    } else {
+      db.data.users.push({
+        id: u.id,
+        email: u.email,
+        password_hash: hash,
+        display_name: u.displayName,
+        role: u.role,
+        created_at: now,
+      });
+    }
   }
 
-  await pool.execute(
-    `INSERT INTO platform_admins (user_id, note) VALUES (?, ?)
-     ON DUPLICATE KEY UPDATE note = VALUES(note)`,
-    [ADMIN_USER_ID, "演示：平台管理员，可管理全部活动"]
-  );
+  // 插入或更新平台管理员
+  const existingAdmin = db.data.platform_admins.find((admin) => admin.user_id === ADMIN_USER_ID);
+  if (existingAdmin) {
+    existingAdmin.note = "演示：平台管理员，可管理全部活动";
+  } else {
+    db.data.platform_admins.push({
+      user_id: ADMIN_USER_ID,
+      note: "演示：平台管理员，可管理全部活动",
+      created_at: now,
+    });
+  }
 
-  const placeholders = ACTIVITY_IDS.map(() => "?").join(", ");
-  await pool.execute(`DELETE FROM activities WHERE id IN (${placeholders})`, ACTIVITY_IDS);
+  // 删除旧的演示活动
+  db.data.activities = db.data.activities.filter((activity) => !ACTIVITY_IDS.includes(activity.id));
 
+  // 插入新的演示活动
   for (const a of SEED_ACTIVITIES) {
     const publisher_role = a.user_id === SCHOOL ? "school" : "student";
-    await pool.execute(
-      `INSERT INTO activities
-        (id, user_id, publisher_role, title, description, location, organizer, contact, category, start_at, end_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        a.id,
-        a.user_id,
-        publisher_role,
-        a.title,
-        a.description,
-        a.location,
-        a.organizer,
-        a.contact,
-        a.category,
-        a.start_at,
-        a.end_at,
-      ]
-    );
+    db.data.activities.push({
+      id: a.id,
+      user_id: a.user_id,
+      publisher_role,
+      title: a.title,
+      description: a.description,
+      location: a.location,
+      organizer: a.organizer,
+      contact: a.contact,
+      category: a.category,
+      start_at: a.start_at.toISOString(),
+      end_at: a.end_at ? a.end_at.toISOString() : null,
+      created_at: now,
+      updated_at: now,
+    });
   }
+
+  await db.write();
 
   console.log("Seed 完成：已写入 %d 个演示活动。", SEED_ACTIVITIES.length);
   console.log("账号列表：");
@@ -229,8 +248,7 @@ async function main() {
     let pwd = "demo123456";
     if (u.email === "test@example.com") pwd = "test123456";
     if (u.email === "admin@campus.demo") pwd = "admin123456";
-    const tag =
-      u.id === ADMIN_USER_ID ? "校方·管理员" : u.role === "school" ? "校方" : "学生";
+    const tag = u.id === ADMIN_USER_ID ? "校方·管理员" : u.role === "school" ? "校方" : "学生";
     console.log("  • %s  [%s] %s  密码 %s", u.email, tag, u.displayName, pwd);
   }
   process.exit(0);
