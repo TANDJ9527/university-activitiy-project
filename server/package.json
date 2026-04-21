@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch index-mysql.js",
     "start": "node index-mysql.js",
+    "setup": "node setup.js",
     "seed": "node seed.js"
   },
   "dependencies": {
