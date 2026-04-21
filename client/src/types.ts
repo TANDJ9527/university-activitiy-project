@@ -39,6 +39,13 @@ export interface AuthUser {
   isPlatformAdmin: boolean
 }
 
+export interface Comment {
+  id: string
+  content: string
+  createdAt: string
+  author: ActivityAuthor
+}
+
 export const CATEGORIES: ActivityCategory[] = [
   '讲座',
   '文体',

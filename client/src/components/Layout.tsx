@@ -6,12 +6,12 @@ export function Layout() {
   const { user, ready, logout } = useAuth()
 
   return (
-    <div className="relative min-h-svh font-sans">
+    <div className="relative min-h-screen font-sans">
       <div
         aria-hidden
         className="pointer-events-none fixed inset-x-0 top-0 z-0 h-[420px] bg-[radial-gradient(ellipse_90%_60%_at_50%_-10%,rgba(129,140,248,0.25),transparent)]"
       />
-      <div className="relative z-10 flex min-h-svh flex-col">
+      <div className="relative z-10 flex min-h-screen flex-col">
         <header className="sticky top-0 z-20 border-b border-white/40 bg-white/75 shadow-sm shadow-slate-900/5 backdrop-blur-xl">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-3.5 sm:px-8">
             <Link
@@ -53,19 +53,6 @@ export function Layout() {
                 }
               >
                 搜索与筛选
-              </NavLink>
-              <NavLink
-                to="/comments"
-                className={({ isActive }) =>
-                  [
-                    'rounded-full px-4 py-2 text-sm font-medium no-underline transition',
-                    isActive
-                      ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-indigo-200/80'
-                      : 'text-slate-600 hover:bg-white/90 hover:text-slate-900 hover:shadow-sm',
-                  ].join(' ')
-                }
-              >
-                评论
               </NavLink>
               {ready && user ? (
                 <>

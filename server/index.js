@@ -3,7 +3,7 @@ import cors from "cors";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
-import { db, ensureSchema, mapActivityRow } from "./db.js";
+import { query, testConnection, initDatabase } from "./mysql.js";
 
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
@@ -14,19 +14,19 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: "1mb" }));
 
 async function userPublicFields(userId, email, displayName, role) {
-  const pa = db.data.platform_admins.find((admin) => admin.user_id === userId);
+  const admins = await query("SELECT user_id FROM platform_admins WHERE user_id = ?", [userId]);
   return {
     id: userId,
     email,
     displayName,
     role,
-    isPlatformAdmin: !!pa,
+    isPlatformAdmin: admins.length > 0,
   };
 }
 
 async function isPlatformAdmin(userId) {
-  const pa = db.data.platform_admins.find((admin) => admin.user_id === userId);
-  return !!pa;
+  const admins = await query("SELECT user_id FROM platform_admins WHERE user_id = ?", [userId]);
+  return admins.length > 0;
 }
 
 function signUserToken(user) {
@@ -359,6 +359,95 @@ app.delete("/api/activities/:id", authMiddleware(true), async (req, res) => {
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "删除失败" });
+  }
+});
+
+// Comments API endpoints
+app.get("/api/activities/:id/comments", async (req, res) => {
+  await db.read();
+  const activity = db.data.activities.find((activity) => activity.id === req.params.id);
+  if (!activity) return res.status(404).json({ error: "活动不存在" });
+
+  const comments = db.data.comments
+    .filter((comment) => comment.activity_id === req.params.id)
+    .map((comment) => {
+      const author = db.data.users.find((user) => user.id === comment.user_id);
+      return {
+        id: comment.id,
+        content: comment.content,
+        createdAt: comment.created_at,
+        author: {
+          id: author?.id,
+          displayName: author?.display_name,
+          role: author?.role,
+        },
+      };
+    })
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  res.json(comments);
+});
+
+app.post("/api/activities/:id/comments", authMiddleware(true), async (req, res) => {
+  await db.read();
+  const activity = db.data.activities.find((activity) => activity.id === req.params.id);
+  if (!activity) return res.status(404).json({ error: "活动不存在" });
+
+  const content = String(req.body.content || "").trim();
+  if (!content) return res.status(400).json({ error: "评论内容不能为空" });
+  if (content.length > 2000) return res.status(400).json({ error: "评论内容不能超过 2000 字" });
+
+  const id = randomUUID();
+  const now = new Date().toISOString();
+
+  try {
+    const newComment = {
+      id,
+      activity_id: req.params.id,
+      user_id: req.user.id,
+      content,
+      created_at: now,
+    };
+
+    db.data.comments.push(newComment);
+    await db.write();
+
+    const author = db.data.users.find((user) => user.id === req.user.id);
+    const responseComment = {
+      id: newComment.id,
+      content: newComment.content,
+      createdAt: newComment.created_at,
+      author: {
+        id: author?.id,
+        displayName: author?.display_name,
+        role: author?.role,
+      },
+    };
+
+    res.status(201).json(responseComment);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "发表评论失败" });
+  }
+});
+
+app.delete("/api/comments/:id", authMiddleware(true), async (req, res) => {
+  await db.read();
+  const comment = db.data.comments.find((comment) => comment.id === req.params.id);
+  if (!comment) return res.status(404).json({ error: "评论不存在" });
+
+  const admin = await isPlatformAdmin(req.user.id);
+  if (comment.user_id !== req.user.id && !admin) {
+    return res.status(403).json({ error: "只有评论作者或平台管理员可以删除该评论" });
+  }
+
+  try {
+    db.data.comments = db.data.comments.filter((c) => c.id !== req.params.id);
+    await db.write();
+    res.status(204).send();
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "删除评论失败" });
   }
 });
 

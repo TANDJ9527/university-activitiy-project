@@ -4,7 +4,6 @@ import { ActivityDetail } from './pages/ActivityDetail'
 import { CreateActivity } from './pages/CreateActivity'
 import { EditActivity } from './pages/EditActivity'
 import { ActivitySearch } from './pages/ActivitySearch'
-import { CommentsCenter } from './pages/CommentsCenter'
 import { Home } from './pages/Home'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
@@ -16,7 +15,6 @@ export default function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<Home />} />
           <Route path="search" element={<ActivitySearch />} />
-          <Route path="comments" element={<CommentsCenter />} />
           <Route path="login" element={<Login />} />
           <Route path="register" element={<Register />} />
           <Route path="publish" element={<CreateActivity />} />

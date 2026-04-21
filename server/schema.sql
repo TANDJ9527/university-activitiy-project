@@ -38,3 +38,15 @@ CREATE TABLE IF NOT EXISTS platform_admins (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   CONSTRAINT fk_platform_admins_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS comments (
+  id CHAR(36) NOT NULL PRIMARY KEY,
+  activity_id CHAR(36) NOT NULL,
+  user_id CHAR(36) NOT NULL,
+  content TEXT NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  KEY idx_comments_activity (activity_id),
+  KEY idx_comments_user (user_id),
+  CONSTRAINT fk_comments_activity FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+  CONSTRAINT fk_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

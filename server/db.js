@@ -11,6 +11,7 @@ const defaultData = {
   users: [],
   activities: [],
   platform_admins: [],
+  comments: [],
 };
 
 // 创建数据库实例

@@ -1,4 +1,4 @@
-import type { Activity, AuthUser } from './types'
+import type { Activity, AuthUser, Comment } from './types'
 import { getToken } from './authStorage'
 
 function authHeaders(): HeadersInit {
@@ -120,6 +120,30 @@ export async function updateActivity(
 
 export async function deleteActivity(id: string): Promise<void> {
   const res = await fetch(`/api/activities/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+}
+
+export async function getActivityComments(activityId: string): Promise<Comment[]> {
+  const res = await fetch(`/api/activities/${encodeURIComponent(activityId)}/comments`)
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<Comment[]>
+}
+
+export async function createComment(activityId: string, content: string): Promise<Comment> {
+  const res = await fetch(`/api/activities/${encodeURIComponent(activityId)}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ content }),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<Comment>
+}
+
+export async function deleteComment(commentId: string): Promise<void> {
+  const res = await fetch(`/api/comments/${encodeURIComponent(commentId)}`, {
     method: 'DELETE',
     headers: { ...authHeaders() },
   })
