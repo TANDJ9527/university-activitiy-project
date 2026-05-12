@@ -7,6 +7,9 @@ import { ActivitySearch } from './pages/ActivitySearch'
 import { Home } from './pages/Home'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
+import { Account } from './pages/Account'
+import { Favorites } from './pages/Favorites'
+import { AdminModeration } from './pages/AdminModeration'
 
 export default function App() {
   return (
@@ -17,6 +20,9 @@ export default function App() {
           <Route path="search" element={<ActivitySearch />} />
           <Route path="login" element={<Login />} />
           <Route path="register" element={<Register />} />
+          <Route path="account" element={<Account />} />
+          <Route path="account/favorites" element={<Favorites />} />
+          <Route path="admin/moderation" element={<AdminModeration />} />
           <Route path="publish" element={<CreateActivity />} />
           <Route path="activity/:id" element={<ActivityDetail />} />
           <Route path="activity/:id/edit" element={<EditActivity />} />

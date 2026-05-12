@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export function Register() {
   const { register, user, ready } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -46,6 +47,7 @@ export function Register() {
         已有账号？{' '}
         <Link
           to="/login"
+          state={location.state}
           className="font-semibold text-indigo-700 underline decoration-indigo-300 underline-offset-4"
         >
           登录

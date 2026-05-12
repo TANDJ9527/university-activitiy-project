@@ -140,7 +140,7 @@ export function ActivitySearch() {
       ) : null}
 
       {loading ? (
-        <ul className="grid gap-5 sm:grid-cols-1 lg:grid-cols-2">
+        <ul className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           {Array.from({ length: 4 }).map((_, i) => (
             <li key={i}>
               <CardSkeleton />
@@ -170,7 +170,7 @@ export function ActivitySearch() {
       ) : (
         <>
           <p className="mb-4 text-sm font-medium text-slate-500">共 {items.length} 场活动</p>
-          <ul className="grid gap-5 sm:grid-cols-1 lg:grid-cols-2">
+          <ul className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-2">
             {items.map((a) => (
               <li key={a.id} className="flex">
                 <ActivityCard a={a} />

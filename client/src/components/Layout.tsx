@@ -54,9 +54,27 @@ export function Layout() {
               >
                 搜索与筛选
               </NavLink>
+              {ready && user?.isPlatformAdmin ? (
+                <NavLink
+                  to="/admin/moderation"
+                  className={({ isActive }) =>
+                    [
+                      'rounded-full px-4 py-2 text-sm font-medium no-underline transition',
+                      isActive
+                        ? 'bg-amber-50 text-amber-950 shadow-sm ring-1 ring-amber-200/90'
+                        : 'text-amber-900/90 hover:bg-amber-50/80 hover:shadow-sm',
+                    ].join(' ')
+                  }
+                >
+                  待审核
+                </NavLink>
+              ) : null}
               {ready && user ? (
                 <>
-                  <div className="hidden items-center gap-2 rounded-full border border-slate-200/80 bg-white/60 px-3 py-1.5 sm:flex">
+                  <Link
+                    to="/account"
+                    className="hidden max-w-[200px] items-center gap-2 rounded-full border border-slate-200/80 bg-white/60 px-3 py-1.5 no-underline transition hover:border-indigo-200 hover:bg-indigo-50/40 sm:flex"
+                  >
                     <span className="line-clamp-1 max-w-[140px] text-sm font-medium text-slate-800">
                       {user.displayName}
                     </span>
@@ -68,7 +86,7 @@ export function Layout() {
                         管理员
                       </span>
                     ) : null}
-                  </div>
+                  </Link>
                   <Link
                     to="/publish"
                     className="rounded-full bg-gradient-to-r from-indigo-600 to-sky-600 px-5 py-2 text-sm font-semibold text-white no-underline shadow-md shadow-indigo-500/25 transition hover:to-indigo-600 hover:shadow-lg"

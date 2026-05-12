@@ -24,11 +24,33 @@ export interface Activity {
   category: ActivityCategory | string
   startAt: string
   endAt: string | null
-  createdAt: string
-  updatedAt: string
+  createdAt: string | null
+  updatedAt: string | null
   /** 发布渠道：学生账号发布 / 校方账号发布（与创建时账号身份一致） */
   publisherRole: UserRole
   author: ActivityAuthor
+  /** 当前登录用户是否已收藏（仅带登录态请求列表/详情时返回） */
+  favorited?: boolean
+  /** 收藏时间（仅「我的收藏」接口返回） */
+  favoritedAt?: string | null
+}
+
+export type ModerationType = 'create' | 'update' | 'delete'
+export type ModerationStatus = 'pending' | 'approved' | 'rejected'
+
+export interface ModerationRequest {
+  id: string
+  type: ModerationType
+  status: ModerationStatus
+  activityId: string | null
+  payload: Record<string, unknown> | null
+  requesterId: string
+  requesterName?: string
+  requesterEmail?: string
+  createdAt: string | null
+  reviewedAt: string | null
+  reviewerId: string | null
+  rejectReason: string | null
 }
 
 export interface AuthUser {
@@ -37,6 +59,11 @@ export interface AuthUser {
   displayName: string
   role: UserRole
   isPlatformAdmin: boolean
+}
+
+/** 学生（非平台管理员）发布/改/删活动须走审核 */
+export function needsActivityModeration(u: AuthUser | null | undefined): boolean {
+  return Boolean(u && u.role === 'student' && !u.isPlatformAdmin)
 }
 
 export interface Comment {

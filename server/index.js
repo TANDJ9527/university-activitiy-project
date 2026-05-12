@@ -61,9 +61,31 @@ function authMiddleware(required) {
   };
 }
 
+function mapActivityRow(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    location: row.location,
+    organizer: row.organizer,
+    contact: row.contact,
+    category: row.category,
+    startAt: row.start_at ? new Date(row.start_at).toISOString() : null,
+    endAt: row.end_at ? new Date(row.end_at).toISOString() : null,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    publisherRole: row.publisher_role,
+    author: {
+      id: row.user_id,
+      displayName: row.author_display_name,
+      role: row.author_role,
+    },
+  };
+}
+
 app.get("/api/health", async (_req, res) => {
   try {
-    await db.read();
+    await testConnection();
     res.json({ ok: true, db: true });
   } catch {
     res.json({ ok: true, db: false });
@@ -71,7 +93,6 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.post("/api/auth/register", async (req, res) => {
-  await db.read();
   const body = req.body || {};
   const email = String(body.email || "").trim().toLowerCase();
   const password = String(body.password || "");
@@ -87,26 +108,19 @@ app.post("/api/auth/register", async (req, res) => {
     return res.status(400).json({ error: "请填写昵称（不超过 100 字）" });
   }
 
-  // 检查邮箱是否已存在
-  const existingUser = db.data.users.find((user) => user.email === email);
-  if (existingUser) {
+  const existingUsers = await query("SELECT id FROM users WHERE email = ?", [email]);
+  if (existingUsers.length > 0) {
     return res.status(409).json({ error: "该邮箱已注册" });
   }
 
   const id = randomUUID();
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-  const now = new Date().toISOString();
 
   try {
-    db.data.users.push({
-      id,
-      email,
-      password_hash: passwordHash,
-      display_name: displayName,
-      role,
-      created_at: now,
-    });
-    await db.write();
+    await query(
+      "INSERT INTO users (id, email, password_hash, display_name, role) VALUES (?, ?, ?, ?, ?)",
+      [id, email, passwordHash, displayName, role]
+    );
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "注册失败" });
@@ -118,14 +132,14 @@ app.post("/api/auth/register", async (req, res) => {
 });
 
 app.post("/api/auth/login", async (req, res) => {
-  await db.read();
   const email = String(req.body?.email || "").trim().toLowerCase();
   const password = String(req.body?.password || "");
   if (!email || !password) {
     return res.status(400).json({ error: "请填写邮箱和密码" });
   }
 
-  const user = db.data.users.find((user) => user.email === email);
+  const users = await query("SELECT * FROM users WHERE email = ?", [email]);
+  const user = users[0];
   if (!user) return res.status(401).json({ error: "邮箱或密码错误" });
 
   const ok = await bcrypt.compare(password, user.password_hash);
@@ -136,76 +150,95 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 app.get("/api/auth/me", authMiddleware(true), async (req, res) => {
-  await db.read();
-  const user = db.data.users.find((user) => user.id === req.user.id);
+  const users = await query("SELECT * FROM users WHERE id = ?", [req.user.id]);
+  const user = users[0];
+  if (!user) return res.status(404).json({ error: "用户不存在" });
+  const userPublic = await userPublicFields(user.id, user.email, user.display_name, user.role);
+  res.json({ user: userPublic });
+});
+
+app.put("/api/auth/me", authMiddleware(true), async (req, res) => {
+  const displayName = String(req.body?.displayName ?? "").trim();
+  if (!displayName || displayName.length > 100) {
+    return res.status(400).json({ error: "昵称须为 1–100 字" });
+  }
+  try {
+    await query("UPDATE users SET display_name = ? WHERE id = ?", [displayName, req.user.id]);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "更新失败" });
+  }
+  const users = await query("SELECT * FROM users WHERE id = ?", [req.user.id]);
+  const user = users[0];
   if (!user) return res.status(404).json({ error: "用户不存在" });
   const userPublic = await userPublicFields(user.id, user.email, user.display_name, user.role);
   res.json({ user: userPublic });
 });
 
 app.get("/api/activities", async (req, res) => {
-  await db.read();
   const { q, category, sort, publisher } = req.query;
 
-  let activities = db.data.activities.map((activity) => {
-    const author = db.data.users.find((user) => user.id === activity.user_id);
-    return {
-      ...activity,
-      author_display_name: author?.display_name,
-      author_role: author?.role,
-    };
-  });
+  let sql = `
+    SELECT a.*, u.display_name as author_display_name, u.role as author_role
+    FROM activities a
+    JOIN users u ON a.user_id = u.id
+  `;
+  let params = [];
+  let conditions = [];
 
-  // 过滤
   if (typeof q === "string" && q.trim()) {
     const searchTerm = q.trim().toLowerCase();
-    activities = activities.filter((activity) => {
-      return (
-        activity.title.toLowerCase().includes(searchTerm) ||
-        activity.description.toLowerCase().includes(searchTerm) ||
-        activity.location.toLowerCase().includes(searchTerm) ||
-        activity.organizer.toLowerCase().includes(searchTerm)
-      );
-    });
+    conditions.push("(LOWER(a.title) LIKE ? OR LOWER(a.description) LIKE ? OR LOWER(a.location) LIKE ? OR LOWER(a.organizer) LIKE ?)");
+    params.push(`%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`);
   }
   if (typeof category === "string" && category && category !== "all") {
-    activities = activities.filter((activity) => activity.category === category);
+    conditions.push("a.category = ?");
+    params.push(category);
   }
   if (publisher === "student" || publisher === "school") {
-    activities = activities.filter((activity) => activity.publisher_role === publisher);
+    conditions.push("a.publisher_role = ?");
+    params.push(publisher);
   }
 
-  // 排序
-  if (sort === "startAsc") {
-    activities.sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
-  } else if (sort === "startDesc") {
-    activities.sort((a, b) => new Date(b.start_at) - new Date(a.start_at));
+  if (conditions.length > 0) {
+    sql += " WHERE " + conditions.join(" AND ");
+  }
+
+  if (sort === "startDesc") {
+    sql += " ORDER BY a.start_at DESC";
+  } else if (sort === "new") {
+    sql += " ORDER BY a.created_at DESC";
   } else {
-    activities.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    sql += " ORDER BY a.start_at ASC";
   }
 
-  const mappedActivities = activities.map(mapActivityRow);
-  res.json({ activities: mappedActivities });
+  try {
+    const rows = await query(sql, params);
+    const activities = rows.map(mapActivityRow);
+    res.json({ activities });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "获取活动列表失败" });
+  }
 });
 
 app.get("/api/activities/:id", async (req, res) => {
-  await db.read();
-  const activity = db.data.activities.find((activity) => activity.id === req.params.id);
-  if (!activity) return res.status(404).json({ error: "未找到活动" });
+  const rows = await query(
+    `SELECT a.*, u.display_name as author_display_name, u.role as author_role
+     FROM activities a
+     JOIN users u ON a.user_id = u.id
+     WHERE a.id = ?`,
+    [req.params.id]
+  );
 
-  const author = db.data.users.find((user) => user.id === activity.user_id);
-  const activityWithAuthor = {
-    ...activity,
-    author_display_name: author?.display_name,
-    author_role: author?.role,
-  };
+  const activityWithAuthor = rows[0];
+  if (!activityWithAuthor) return res.status(404).json({ error: "未找到活动" });
 
   const mappedActivity = mapActivityRow(activityWithAuthor);
   res.json(mappedActivity);
 });
 
 app.post("/api/activities", authMiddleware(true), async (req, res) => {
-  await db.read();
   const body = req.body || {};
   const title = String(body.title || "").trim();
   const description = String(body.description || "").trim();
@@ -238,35 +271,37 @@ app.post("/api/activities", authMiddleware(true), async (req, res) => {
   const id = randomUUID();
   const uid = req.user.id;
   const publisherRole = req.user.role === "school" ? "school" : "student";
-  const now = new Date().toISOString();
 
   try {
-    const newActivity = {
-      id,
-      user_id: uid,
-      publisher_role: publisherRole,
-      title,
-      description,
-      location,
-      organizer,
-      contact,
-      category,
-      start_at: start.toISOString(),
-      end_at: end ? end.toISOString() : null,
-      created_at: now,
-      updated_at: now,
-    };
+    await query(
+      `INSERT INTO activities (
+        id, user_id, publisher_role, title, description, location, 
+        organizer, contact, category, start_at, end_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        uid,
+        publisherRole,
+        title,
+        description,
+        location,
+        organizer,
+        contact,
+        category,
+        start.toISOString().replace('T', ' ').slice(0, 19),
+        end ? end.toISOString().replace('T', ' ').slice(0, 19) : null,
+      ]
+    );
 
-    db.data.activities.push(newActivity);
-    await db.write();
+    const rows = await query(
+      `SELECT a.*, u.display_name as author_display_name, u.role as author_role 
+       FROM activities a 
+       JOIN users u ON a.user_id = u.id 
+       WHERE a.id = ?`,
+      [id]
+    );
 
-    const author = db.data.users.find((user) => user.id === uid);
-    const activityWithAuthor = {
-      ...newActivity,
-      author_display_name: author?.display_name,
-      author_role: author?.role,
-    };
-
+    const activityWithAuthor = rows[0];
     const mappedActivity = mapActivityRow(activityWithAuthor);
     res.status(201).json({ activity: mappedActivity });
   } catch (e) {
@@ -276,8 +311,8 @@ app.post("/api/activities", authMiddleware(true), async (req, res) => {
 });
 
 app.put("/api/activities/:id", authMiddleware(true), async (req, res) => {
-  await db.read();
-  const existing = db.data.activities.find((activity) => activity.id === req.params.id);
+  const rows = await query("SELECT * FROM activities WHERE id = ?", [req.params.id]);
+  const existing = rows[0];
   if (!existing) return res.status(404).json({ error: "未找到活动" });
 
   const admin = await isPlatformAdmin(req.user.id);
@@ -295,15 +330,19 @@ app.put("/api/activities/:id", authMiddleware(true), async (req, res) => {
   const startAt = body.startAt !== undefined ? body.startAt : existing.start_at;
   const endAt = body.endAt !== undefined ? body.endAt : existing.end_at;
 
-  if (!title || title.length > 120) {
+  if (title !== undefined && (!title || title.length > 120)) {
     return res.status(400).json({ error: "标题必填且不超过 120 字" });
   }
-  if (!description || description.length > 8000) {
+  if (description !== undefined && (!description || description.length > 8000)) {
     return res.status(400).json({ error: "活动说明必填且不超过 8000 字" });
   }
-  const start = new Date(startAt);
-  if (Number.isNaN(start.getTime())) {
-    return res.status(400).json({ error: "开始时间格式无效" });
+
+  let start = null;
+  if (startAt) {
+    start = new Date(startAt);
+    if (Number.isNaN(start.getTime())) {
+      return res.status(400).json({ error: "开始时间格式无效" });
+    }
   }
   let end = null;
   if (endAt) {
@@ -314,26 +353,33 @@ app.put("/api/activities/:id", authMiddleware(true), async (req, res) => {
   }
 
   try {
-    Object.assign(existing, {
-      title,
-      description,
-      location,
-      organizer,
-      contact,
-      category,
-      start_at: start.toISOString(),
-      end_at: end ? end.toISOString() : null,
-      updated_at: new Date().toISOString(),
-    });
-    await db.write();
+    await query(
+      `UPDATE activities SET 
+        title = ?, description = ?, location = ?, organizer = ?, contact = ?, 
+        category = ?, start_at = ?, end_at = ?
+       WHERE id = ?`,
+      [
+        title,
+        description,
+        location,
+        organizer,
+        contact,
+        category,
+        start ? start.toISOString().replace('T', ' ').slice(0, 19) : existing.start_at,
+        end ? end.toISOString().replace('T', ' ').slice(0, 19) : existing.end_at,
+        req.params.id,
+      ]
+    );
 
-    const author = db.data.users.find((user) => user.id === existing.user_id);
-    const activityWithAuthor = {
-      ...existing,
-      author_display_name: author?.display_name,
-      author_role: author?.role,
-    };
+    const updatedRows = await query(
+      `SELECT a.*, u.display_name as author_display_name, u.role as author_role 
+       FROM activities a 
+       JOIN users u ON a.user_id = u.id 
+       WHERE a.id = ?`,
+      [req.params.id]
+    );
 
+    const activityWithAuthor = updatedRows[0];
     const mappedActivity = mapActivityRow(activityWithAuthor);
     res.json({ activity: mappedActivity });
   } catch (e) {
@@ -343,8 +389,8 @@ app.put("/api/activities/:id", authMiddleware(true), async (req, res) => {
 });
 
 app.delete("/api/activities/:id", authMiddleware(true), async (req, res) => {
-  await db.read();
-  const existing = db.data.activities.find((activity) => activity.id === req.params.id);
+  const rows = await query("SELECT * FROM activities WHERE id = ?", [req.params.id]);
+  const existing = rows[0];
   if (!existing) return res.status(404).json({ error: "未找到活动" });
 
   const admin = await isPlatformAdmin(req.user.id);
@@ -353,8 +399,7 @@ app.delete("/api/activities/:id", authMiddleware(true), async (req, res) => {
   }
 
   try {
-    db.data.activities = db.data.activities.filter((activity) => activity.id !== req.params.id);
-    await db.write();
+    await query("DELETE FROM activities WHERE id = ?", [req.params.id]);
     res.status(204).send();
   } catch (e) {
     console.error(e);
@@ -362,63 +407,56 @@ app.delete("/api/activities/:id", authMiddleware(true), async (req, res) => {
   }
 });
 
-// Comments API endpoints
 app.get("/api/activities/:id/comments", async (req, res) => {
-  await db.read();
-  const activity = db.data.activities.find((activity) => activity.id === req.params.id);
-  if (!activity) return res.status(404).json({ error: "活动不存在" });
+  const rows = await query(
+    `SELECT c.*, u.display_name, u.role 
+     FROM comments c 
+     JOIN users u ON c.user_id = u.id 
+     WHERE c.activity_id = ? 
+     ORDER BY c.created_at ASC`,
+    [req.params.id]
+  );
 
-  const comments = db.data.comments
-    .filter((comment) => comment.activity_id === req.params.id)
-    .map((comment) => {
-      const author = db.data.users.find((user) => user.id === comment.user_id);
-      return {
-        id: comment.id,
-        content: comment.content,
-        createdAt: comment.created_at,
-        author: {
-          id: author?.id,
-          displayName: author?.display_name,
-          role: author?.role,
-        },
-      };
-    })
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const comments = rows.map((row) => ({
+    id: row.id,
+    content: row.content,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    author: {
+      id: row.user_id,
+      displayName: row.display_name,
+      role: row.role,
+    },
+  }));
 
-  res.json(comments);
+  res.json({ comments });
 });
 
 app.post("/api/activities/:id/comments", authMiddleware(true), async (req, res) => {
-  await db.read();
-  const activity = db.data.activities.find((activity) => activity.id === req.params.id);
-  if (!activity) return res.status(404).json({ error: "活动不存在" });
-
-  const content = String(req.body.content || "").trim();
-  if (!content) return res.status(400).json({ error: "评论内容不能为空" });
-  if (content.length > 2000) return res.status(400).json({ error: "评论内容不能超过 2000 字" });
+  const content = String(req.body?.content || "").trim();
+  if (!content) return res.status(400).json({ error: "请输入评论内容" });
+  if (content.length > 2000) return res.status(400).json({ error: "评论内容不超过 2000 字" });
 
   const id = randomUUID();
   const now = new Date().toISOString();
 
   try {
-    const newComment = {
-      id,
-      activity_id: req.params.id,
-      user_id: req.user.id,
-      content,
-      created_at: now,
-    };
+    await query(
+      "INSERT INTO comments (id, activity_id, user_id, content) VALUES (?, ?, ?, ?)",
+      [id, req.params.id, req.user.id, content]
+    );
 
-    db.data.comments.push(newComment);
-    await db.write();
+    const rows = await query(
+      "SELECT u.display_name, u.role FROM users u WHERE u.id = ?",
+      [req.user.id]
+    );
 
-    const author = db.data.users.find((user) => user.id === req.user.id);
+    const author = rows[0];
     const responseComment = {
-      id: newComment.id,
-      content: newComment.content,
-      createdAt: newComment.created_at,
+      id,
+      content,
+      createdAt: now,
       author: {
-        id: author?.id,
+        id: req.user.id,
         displayName: author?.display_name,
         role: author?.role,
       },
@@ -432,8 +470,8 @@ app.post("/api/activities/:id/comments", authMiddleware(true), async (req, res) 
 });
 
 app.delete("/api/comments/:id", authMiddleware(true), async (req, res) => {
-  await db.read();
-  const comment = db.data.comments.find((comment) => comment.id === req.params.id);
+  const rows = await query("SELECT * FROM comments WHERE id = ?", [req.params.id]);
+  const comment = rows[0];
   if (!comment) return res.status(404).json({ error: "评论不存在" });
 
   const admin = await isPlatformAdmin(req.user.id);
@@ -442,8 +480,7 @@ app.delete("/api/comments/:id", authMiddleware(true), async (req, res) => {
   }
 
   try {
-    db.data.comments = db.data.comments.filter((c) => c.id !== req.params.id);
-    await db.write();
+    await query("DELETE FROM comments WHERE id = ?", [req.params.id]);
     res.status(204).send();
   } catch (e) {
     console.error(e);
@@ -452,13 +489,10 @@ app.delete("/api/comments/:id", authMiddleware(true), async (req, res) => {
 });
 
 async function start() {
-  await ensureSchema();
+  await initDatabase();
   app.listen(PORT, () => {
-    console.log(`Campus events API http://localhost:${PORT}`);
+    console.log(`🚀 校园活动API服务器运行在 http://localhost:${PORT}`);
   });
 }
 
-start().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+start().catch(console.error);

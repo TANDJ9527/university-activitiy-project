@@ -23,6 +23,7 @@ type AuthState = {
   }) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
+  updateDisplayName: (displayName: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -85,9 +86,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
+  const updateDisplayName = useCallback(async (displayName: string) => {
+    const u = await api.updateMe({ displayName })
+    setUser(u)
+  }, [])
+
   const value = useMemo(
-    () => ({ user, ready, login, register, logout, refreshUser }),
-    [user, ready, login, register, logout, refreshUser]
+    () => ({ user, ready, login, register, logout, refreshUser, updateDisplayName }),
+    [user, ready, login, register, logout, refreshUser, updateDisplayName]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

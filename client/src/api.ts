@@ -1,4 +1,4 @@
-import type { Activity, AuthUser, Comment } from './types'
+import type { Activity, AuthUser, Comment, ModerationRequest } from './types'
 import { getToken } from './authStorage'
 
 function authHeaders(): HeadersInit {
@@ -47,6 +47,17 @@ export async function fetchMe(): Promise<AuthUser> {
   return data.user
 }
 
+export async function updateMe(body: { displayName: string }): Promise<AuthUser> {
+  const res = await fetch('/api/auth/me', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = (await res.json()) as { user: AuthUser }
+  return data.user
+}
+
 export async function listActivities(params: {
   q?: string
   category?: string
@@ -62,17 +73,23 @@ export async function listActivities(params: {
       ? 'startAsc'
       : params.sort === 'startDesc'
         ? 'startDesc'
-        : undefined
+        : params.sort === 'new'
+          ? 'new'
+          : undefined
   if (sort) sp.set('sort', sort)
 
-  const res = await fetch(`/api/activities?${sp.toString()}`)
+  const res = await fetch(`/api/activities?${sp.toString()}`, {
+    headers: { ...authHeaders() },
+  })
   if (!res.ok) throw new Error(await parseError(res))
   const data = (await res.json()) as { activities: Activity[] }
   return data.activities
 }
 
 export async function getActivity(id: string): Promise<Activity> {
-  const res = await fetch(`/api/activities/${encodeURIComponent(id)}`)
+  const res = await fetch(`/api/activities/${encodeURIComponent(id)}`, {
+    headers: { ...authHeaders() },
+  })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<Activity>
 }
@@ -129,7 +146,8 @@ export async function deleteActivity(id: string): Promise<void> {
 export async function getActivityComments(activityId: string): Promise<Comment[]> {
   const res = await fetch(`/api/activities/${encodeURIComponent(activityId)}/comments`)
   if (!res.ok) throw new Error(await parseError(res))
-  return res.json() as Promise<Comment[]>
+  const data = (await res.json()) as { comments?: Comment[] }
+  return Array.isArray(data.comments) ? data.comments : []
 }
 
 export async function createComment(activityId: string, content: string): Promise<Comment> {
@@ -144,6 +162,84 @@ export async function createComment(activityId: string, content: string): Promis
 
 export async function deleteComment(commentId: string): Promise<void> {
   const res = await fetch(`/api/comments/${encodeURIComponent(commentId)}`, {
+    method: 'DELETE',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+}
+
+export type ActivityPayload = {
+  title: string
+  description: string
+  location: string
+  organizer: string
+  contact: string
+  category: string
+  startAt: string
+  endAt: string | null
+}
+
+export async function createModerationRequest(body: {
+  type: 'create' | 'update' | 'delete'
+  activityId?: string
+  payload?: ActivityPayload
+}): Promise<{ request: ModerationRequest }> {
+  const res = await fetch('/api/moderation/requests', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ request: ModerationRequest }>
+}
+
+export async function listPendingModeration(): Promise<ModerationRequest[]> {
+  const res = await fetch('/api/admin/moderation/pending', { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = (await res.json()) as { requests: ModerationRequest[] }
+  return data.requests ?? []
+}
+
+export async function approveModeration(id: string): Promise<{ request: ModerationRequest }> {
+  const res = await fetch(`/api/admin/moderation/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ request: ModerationRequest }>
+}
+
+export async function rejectModeration(
+  id: string,
+  reason?: string
+): Promise<{ request: ModerationRequest }> {
+  const res = await fetch(`/api/admin/moderation/${encodeURIComponent(id)}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ reason: reason ?? '' }),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ request: ModerationRequest }>
+}
+
+export async function toggleFavorite(activityId: string): Promise<{ favorited: boolean }> {
+  const res = await fetch(`/api/activities/${encodeURIComponent(activityId)}/favorite`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ favorited: boolean }>
+}
+
+export async function listMyFavorites(): Promise<Activity[]> {
+  const res = await fetch('/api/me/favorites', { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = (await res.json()) as { activities: Activity[] }
+  return data.activities ?? []
+}
+
+export async function clearAllFavorites(): Promise<void> {
+  const res = await fetch('/api/me/favorites', {
     method: 'DELETE',
     headers: { ...authHeaders() },
   })

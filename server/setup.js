@@ -17,9 +17,10 @@ import path from 'path';
 dotenv.config();
 
 // 数据库连接配置（使用 root 用户创建数据库）
+const setupPort = Number(process.env.MYSQL_PORT);
 const rootConfig = {
   host: process.env.MYSQL_HOST || 'localhost',
-  port: process.env.MYSQL_PORT || 3306,
+  port: Number.isFinite(setupPort) && setupPort > 0 ? setupPort : 3306,
   user: process.env.MYSQL_USER || 'root',
   password: process.env.MYSQL_PASSWORD || '',
 };
@@ -118,6 +119,43 @@ async function setupDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='平台管理员表'
     `);
     console.log('✅ 平台管理员表创建成功\n');
+
+    console.log('📋 创建收藏表...');
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS activity_favorites (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        user_id CHAR(36) NOT NULL,
+        activity_id CHAR(36) NOT NULL,
+        created_at DATETIME(3) NOT NULL,
+        UNIQUE KEY uk_fav_user_activity (user_id, activity_id),
+        KEY idx_fav_user_created (user_id, created_at),
+        KEY idx_fav_activity (activity_id),
+        CONSTRAINT fk_fav_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_fav_activity FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    console.log('✅ 收藏表创建成功');
+
+    console.log('📋 创建活动审核表...');
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS moderation_requests (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        type ENUM('create','update','delete') NOT NULL,
+        requester_id CHAR(36) NOT NULL,
+        activity_id CHAR(36) NULL,
+        payload JSON NULL,
+        status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+        reviewer_id CHAR(36) NULL,
+        reviewed_at DATETIME(3) NULL,
+        reject_reason VARCHAR(500) NULL,
+        created_at DATETIME(3) NOT NULL,
+        KEY idx_mod_status_created (status, created_at),
+        KEY idx_mod_requester (requester_id),
+        CONSTRAINT fk_mod_requester FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_mod_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    console.log('✅ 活动审核表创建成功\n');
 
     // 8. 显示创建的表
     console.log('📊 数据库表结构:');

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { getActivity, updateActivity } from '../api'
+import { getActivity, updateActivity, createModerationRequest } from '../api'
 import { useAuth } from '../context/AuthContext'
 import { ActivityForm, payloadFromValues, valuesFromActivity } from './ActivityForm'
 import type { Activity } from '../types'
+import { needsActivityModeration } from '../types'
 
 export function EditActivity() {
   const { id } = useParams<{ id: string }>()
@@ -76,6 +77,11 @@ export function EditActivity() {
         </p>
       ) : null}
       <h1 className="font-display mb-2 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">编辑活动</h1>
+      {user && activity.author.id === user.id && needsActivityModeration(user) ? (
+        <p className="mb-4 rounded-xl border border-amber-200/90 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+          学生修改活动需经管理员审核，提交后原内容仍展示在广场，审核通过后更新。
+        </p>
+      ) : null}
       <p className="mb-8">
         <Link
           to={`/activity/${activity.id}`}
@@ -87,9 +93,23 @@ export function EditActivity() {
       <ActivityForm
         key={activity.id}
         initial={valuesFromActivity(activity)}
-        submitLabel="保存修改"
+        submitLabel={
+          activity.author.id === user?.id && user && needsActivityModeration(user)
+            ? '提交修改审核'
+            : '保存修改'
+        }
         onSubmit={async (v) => {
           const payload = payloadFromValues(v)
+          if (user && activity.author.id === user.id && needsActivityModeration(user)) {
+            await createModerationRequest({
+              type: 'update',
+              activityId: activity.id,
+              payload,
+            })
+            alert('修改申请已提交，管理员通过后将在活动广场与详情页生效。')
+            navigate(`/activity/${activity.id}`)
+            return
+          }
           await updateActivity(activity.id, payload)
           navigate(`/activity/${activity.id}`)
         }}

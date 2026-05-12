@@ -1,8 +1,9 @@
 import { Navigate, useNavigate } from 'react-router-dom'
-import { createActivity } from '../api'
+import { createActivity, createModerationRequest } from '../api'
 import { useAuth } from '../context/AuthContext'
 import { ActivityForm } from './ActivityForm'
 import { payloadFromValues } from './ActivityFormTypes'
+import { needsActivityModeration } from '../types'
 import { Sparkles, ArrowLeft } from 'lucide-react'
 
 export function CreateActivity() {
@@ -15,6 +16,8 @@ export function CreateActivity() {
   const roleBadge = user.role === 'school' 
     ? { text: '校方 / 组织方', color: 'bg-indigo-50 text-indigo-700 ring-indigo-200' }
     : { text: '学生', color: 'bg-sky-50 text-sky-700 ring-sky-200' }
+
+  const needsMod = user ? needsActivityModeration(user) : false
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -62,7 +65,9 @@ export function CreateActivity() {
             </div>
             <p className="text-sm text-slate-600">
               当前以 <span className="font-semibold text-slate-800">「{roleBadge.text}」</span> 身份发布。
-              请确保活动信息真实有效，审核通过后将立即展示在活动广场。
+              {needsMod
+                ? ' 学生发布活动将提交至平台管理员审核，通过后将出现在活动广场。'
+                : ' 请确保活动信息真实有效，保存后将立即展示在活动广场。'}
             </p>
           </div>
         </div>
@@ -71,9 +76,15 @@ export function CreateActivity() {
       {/* 表单区域 */}
       <div className="rounded-2xl bg-white p-6 shadow-xl shadow-slate-900/5 ring-1 ring-slate-200 sm:p-10">
         <ActivityForm
-          submitLabel="发布活动"
+          submitLabel={needsMod ? '提交审核' : '发布活动'}
           onSubmit={async (v) => {
             const payload = payloadFromValues(v)
+            if (needsMod) {
+              await createModerationRequest({ type: 'create', payload })
+              alert('已提交审核，管理员通过后将发布在活动广场。')
+              navigate('/')
+              return
+            }
             const { activity } = await createActivity(payload)
             navigate(`/activity/${activity.id}`)
           }}

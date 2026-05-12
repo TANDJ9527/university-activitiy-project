@@ -3,16 +3,16 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// 创建数据库连接池
+const mysqlPort = Number(process.env.MYSQL_PORT);
 const pool = mysql.createPool({
   host: process.env.MYSQL_HOST || 'localhost',
-  port: process.env.MYSQL_PORT || 3306,
+  port: Number.isFinite(mysqlPort) && mysqlPort > 0 ? mysqlPort : 3306,
   user: process.env.MYSQL_USER || 'root',
   password: process.env.MYSQL_PASSWORD || '',
   database: process.env.MYSQL_DATABASE || 'program',
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
 });
 
 // 测试数据库连接
@@ -23,7 +23,11 @@ async function testConnection() {
     connection.release();
     return true;
   } catch (error) {
-    console.error('❌ MySQL数据库连接失败:', error.message);
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('❌ MySQL数据库连接失败:', msg);
+    if (/Unknown database/i.test(msg)) {
+      console.error('   提示: 先在 server 目录执行 npm run setup 创建库表，或手动 CREATE DATABASE。');
+    }
     return false;
   }
 }
@@ -99,6 +103,39 @@ async function initDatabase() {
         note VARCHAR(200) NULL,
         created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
         CONSTRAINT fk_platform_admins_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS activity_favorites (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        user_id CHAR(36) NOT NULL,
+        activity_id CHAR(36) NOT NULL,
+        created_at DATETIME(3) NOT NULL,
+        UNIQUE KEY uk_fav_user_activity (user_id, activity_id),
+        KEY idx_fav_user_created (user_id, created_at),
+        KEY idx_fav_activity (activity_id),
+        CONSTRAINT fk_fav_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_fav_activity FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS moderation_requests (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        type ENUM('create','update','delete') NOT NULL,
+        requester_id CHAR(36) NOT NULL,
+        activity_id CHAR(36) NULL,
+        payload JSON NULL,
+        status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+        reviewer_id CHAR(36) NULL,
+        reviewed_at DATETIME(3) NULL,
+        reject_reason VARCHAR(500) NULL,
+        created_at DATETIME(3) NOT NULL,
+        KEY idx_mod_status_created (status, created_at),
+        KEY idx_mod_requester (requester_id),
+        CONSTRAINT fk_mod_requester FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_mod_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE SET NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
 

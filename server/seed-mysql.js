@@ -1,11 +1,17 @@
 /**
- * MySQL 数据库测试用户创建脚本
- * 运行：cd server && node seed-mysql.js
+ * 在 MySQL 中创建/补全测试用户（与 mysql.js 表结构一致）。
+ * 运行：cd server && npm run seed:mysql
  */
 import bcrypt from "bcrypt";
+import { randomUUID } from "crypto";
 import { pool, query } from "./mysql.js";
 
 const SALT_ROUNDS = 10;
+
+/** MySQL DATETIME(3) 不接受带 Z 的 ISO 字符串 */
+function mysqlDateTime3(d = new Date()) {
+  return d.toISOString().replace("T", " ").replace("Z", "").slice(0, 23);
+}
 
 const TEST_USERS = [
   {
@@ -36,63 +42,91 @@ const TEST_USERS = [
 ];
 
 async function seedUsers() {
-  console.log("🌱 开始创建测试用户...\n");
+  console.log("🌱 开始在 MySQL 中写入测试用户…\n");
 
   try {
     for (const user of TEST_USERS) {
-      // 检查用户是否已存在
-      const existing = await query("SELECT id FROM users WHERE email = ?", [
-        user.email,
-      ]);
+      const rows = await query("SELECT id FROM users WHERE email = ?", [user.email]);
+      let userId;
 
-      if (existing.length > 0) {
-        console.log(`⚠️  ${user.email} 已存在，跳过`);
-        continue;
+      if (rows.length > 0) {
+        userId = rows[0].id;
+        console.log(`⚠️  ${user.email} 已存在，跳过创建（id: ${userId}）`);
+      } else {
+        userId = randomUUID();
+        const passwordHash = await bcrypt.hash(user.password, SALT_ROUNDS);
+        const now = mysqlDateTime3();
+        await query(
+          `INSERT INTO users (id, email, password_hash, display_name, role, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [userId, user.email, passwordHash, user.displayName, user.role, now]
+        );
+        console.log(`✅ 已创建用户 ${user.email}（${user.displayName}）`);
       }
 
-      // 加密密码
-      const passwordHash = await bcrypt.hash(user.password, SALT_ROUNDS);
-
-      // 插入用户
-      const result = await query(
-        `INSERT INTO users (email, password_hash, display_name, role, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, NOW(), NOW())`,
-        [user.email, passwordHash, user.displayName, user.role]
-      );
-
-      const userId = result.insertId;
-
-      // 如果是管理员，添加到 platform_admins 表
       if (user.isAdmin) {
-        await query(
-          `INSERT INTO platform_admins (user_id, granted_by, created_at) 
-           VALUES (?, ?, NOW())`,
-          [userId, userId]
-        );
-        console.log(`✅ ${user.email} (${user.displayName}) - 已设为管理员`);
-      } else {
-        console.log(
-          `✅ ${user.email} (${user.displayName}) - ${user.role === "school" ? "校方" : "学生"}`
-        );
+        const admins = await query("SELECT user_id FROM platform_admins WHERE user_id = ?", [userId]);
+        if (admins.length === 0) {
+          const now = mysqlDateTime3();
+          await query(
+            `INSERT INTO platform_admins (user_id, note, created_at) VALUES (?, ?, ?)`,
+            [userId, "seed-mysql：平台管理员", now]
+          );
+          console.log(`   → 已写入 platform_admins`);
+        } else {
+          console.log(`   → platform_admins 中已有记录，跳过`);
+        }
       }
     }
 
-    console.log("\n🎉 测试用户创建完成！");
-    console.log("\n📋 登录信息：");
+    console.log("\n🎉 完成。可用账号：");
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    TEST_USERS.forEach((u) => {
+    for (const u of TEST_USERS) {
       console.log(`👤 ${u.displayName}`);
       console.log(`   邮箱: ${u.email}`);
       console.log(`   密码: ${u.password}`);
-      console.log(`   身份: ${u.role === "school" ? "校方" : "学生"}${u.isAdmin ? " (管理员)" : ""}`);
-      console.log("");
-    });
+      console.log(
+        `   身份: ${u.role === "school" ? "校方" : "学生"}${u.isAdmin ? "（平台管理员）" : ""}\n`
+      );
+    }
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+    const email = "3421083220@qq.com";
+    const hash = await bcrypt.hash("123456", SALT_ROUNDS);
+    const superRows = await query("SELECT id FROM users WHERE email = ?", [email]);
+    const now = mysqlDateTime3();
+    let uid;
+    if (superRows.length > 0) {
+      uid = superRows[0].id;
+      await query(
+        "UPDATE users SET password_hash = ?, display_name = ?, role = ? WHERE id = ?",
+        [hash, "系统管理员", "school", uid]
+      );
+      console.log(`\n✅ 主管理员 ${email} 已更新（密码：123456）`);
+    } else {
+      uid = randomUUID();
+      await query(
+        `INSERT INTO users (id, email, password_hash, display_name, role, created_at)
+         VALUES (?, ?, ?, ?, 'school', ?)`,
+        [uid, email, hash, "系统管理员", now]
+      );
+      console.log(`\n✅ 已创建主管理员 ${email}（密码：123456）`);
+    }
+    const admins = await query("SELECT user_id FROM platform_admins WHERE user_id = ?", [uid]);
+    if (admins.length === 0) {
+      await query(
+        `INSERT INTO platform_admins (user_id, note, created_at) VALUES (?, ?, ?)`,
+        [uid, "主管理员账号（最高权限）", now]
+      );
+      console.log("   → 已写入 platform_admins");
+    } else {
+      console.log("   → platform_admins 中已有该账号");
+    }
   } catch (err) {
-    console.error("❌ 创建失败:", err.message);
-    process.exit(1);
+    console.error("❌ 失败:", err instanceof Error ? err.message : err);
+    process.exitCode = 1;
   } finally {
-    pool.end();
+    await pool.end();
   }
 }
 
