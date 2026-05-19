@@ -132,8 +132,7 @@ export function Home() {
       {/* 错误提示 */}
       {err ? (
         <div className="mb-8 rounded-2xl border border-red-200 bg-red-50/90 px-5 py-4 text-sm text-red-800 shadow-sm">
-          {err}（请确认根目录已 <code className="rounded bg-red-100 px-1.5 py-0.5">npm run dev</code>，且 MySQL 库{' '}
-          <code className="rounded bg-red-100 px-1.5 py-0.5">program</code> 可连接）
+          {err}（请确认后端服务已启动，或稍后重试）
         </div>
       ) : null}
 

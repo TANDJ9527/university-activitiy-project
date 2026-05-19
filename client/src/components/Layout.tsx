@@ -12,18 +12,18 @@ export function Layout() {
         className="pointer-events-none fixed inset-x-0 top-0 z-0 h-[420px] bg-[radial-gradient(ellipse_90%_60%_at_50%_-10%,rgba(129,140,248,0.25),transparent)]"
       />
       <div className="relative z-10 flex min-h-screen flex-col">
-        <header className="sticky top-0 z-20 border-b border-white/40 bg-white/75 shadow-sm shadow-slate-900/5 backdrop-blur-xl">
+        <header className="sticky top-0 z-20 border-b border-white/50 bg-white/70 shadow-sm shadow-slate-900/[0.04] backdrop-blur-2xl">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-3.5 sm:px-8">
             <Link
               to="/"
               className="group flex items-center gap-3 text-slate-900 no-underline"
             >
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-sky-500 text-lg text-white shadow-md shadow-indigo-500/25 transition group-hover:shadow-lg group-hover:shadow-indigo-500/30">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-sky-500 text-lg text-white shadow-lg shadow-indigo-500/30 transition duration-300 group-hover:scale-[1.02] group-hover:shadow-xl">
                 ✦
               </span>
               <span className="flex flex-col leading-tight">
                 <span className="font-display text-lg font-semibold tracking-tight">校园活动汇</span>
-                <span className="text-xs font-medium text-slate-500">学生 × 校方 · 一站式发布</span>
+                <span className="text-xs font-medium text-slate-500">发现 · 发布 · 参与校园精彩</span>
               </span>
             </Link>
             <nav className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -120,12 +120,12 @@ export function Layout() {
             </nav>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-12 pt-8 sm:px-8 sm:pt-10">
+        <main className="page-enter mx-auto w-full max-w-6xl flex-1 px-4 pb-14 pt-8 sm:px-8 sm:pt-10">
           <Outlet />
         </main>
-        <footer className="relative z-10 border-t border-slate-200/80 bg-white/60 py-8 text-center text-xs text-slate-500 backdrop-blur-sm">
-          <p>校园活动汇 · 数据存于 MySQL</p>
-          <p className="mt-1 opacity-80">登录后发布与管理活动 · 演示数据可运行 <code className="rounded bg-slate-100 px-1">npm run seed</code></p>
+        <footer className="relative z-10 border-t border-slate-200/70 bg-white/55 py-8 text-center backdrop-blur-md">
+          <p className="text-sm font-medium text-slate-600">校园活动汇</p>
+          <p className="mt-1.5 text-xs text-slate-500">登录后即可发布与管理活动 · 学生与校方同屏展示</p>
         </footer>
       </div>
     </div>
