@@ -29,9 +29,7 @@ export interface Activity {
   /** 发布渠道：学生账号发布 / 校方账号发布（与创建时账号身份一致） */
   publisherRole: UserRole
   author: ActivityAuthor
-  /** 当前登录用户是否已收藏（仅带登录态请求列表/详情时返回） */
   favorited?: boolean
-  /** 收藏时间（仅「我的收藏」接口返回） */
   favoritedAt?: string | null
 }
 
@@ -61,16 +59,16 @@ export interface AuthUser {
   isPlatformAdmin: boolean
 }
 
-/** 学生（非平台管理员）发布/改/删活动须走审核 */
-export function needsActivityModeration(u: AuthUser | null | undefined): boolean {
-  return Boolean(u && u.role === 'student' && !u.isPlatformAdmin)
-}
-
 export interface Comment {
   id: string
   content: string
   createdAt: string
   author: ActivityAuthor
+}
+
+/** 学生（非平台管理员）发布/改/删活动须走审核 */
+export function needsActivityModeration(u: AuthUser | null | undefined): boolean {
+  return Boolean(u && u.role === 'student' && !u.isPlatformAdmin)
 }
 
 export const CATEGORIES: ActivityCategory[] = [

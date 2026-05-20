@@ -3,11 +3,13 @@ import { Link } from 'react-router-dom'
 import { listActivities } from '../api'
 import { ActivityCard } from '../components/ActivityCard'
 import { CardSkeleton } from '../components/CardSkeleton'
+import { useAuth } from '../context/AuthContext'
 import { CATEGORIES } from '../types'
 
 type Sort = 'new' | 'startAsc' | 'startDesc'
 
 export function ActivitySearch() {
+  const { user } = useAuth()
   const [q, setQ] = useState('')
   const [publisher, setPublisher] = useState<'all' | 'student' | 'school'>('all')
   const [category, setCategory] = useState<string>('all')
@@ -26,13 +28,14 @@ export function ActivitySearch() {
         publisher,
         sort,
       })
-      setItems(data)
+      setItems(Array.isArray(data) ? data : [])
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败')
+      setItems([])
     } finally {
       setLoading(false)
     }
-  }, [q, publisher, category, sort])
+  }, [q, publisher, category, sort, user?.id])
 
   useEffect(() => {
     load()
@@ -64,7 +67,7 @@ export function ActivitySearch() {
         </p>
       </div>
 
-      <div className="glass-panel mb-8 flex flex-col gap-4 p-5 sm:flex-row sm:flex-wrap sm:items-end">
+      <div className="mb-8 flex flex-col gap-4 rounded-2xl border border-white/70 bg-white/70 p-4 shadow-md shadow-slate-900/5 ring-1 ring-slate-200/60 backdrop-blur-md sm:flex-row sm:flex-wrap sm:items-end">
         <label className="flex min-w-[200px] flex-1 flex-col gap-1.5 text-sm">
           <span className="font-semibold text-slate-700">关键词</span>
           <input
@@ -134,14 +137,15 @@ export function ActivitySearch() {
 
       {err ? (
         <div className="mb-8 rounded-2xl border border-red-200/80 bg-red-50/90 px-5 py-4 text-sm text-red-800 shadow-sm">
-          {err}（请确认后端服务已启动，或稍后重试）
+          {err}（请确认根目录已 <code className="rounded bg-red-100/80 px-1">npm run dev</code>，且 MySQL 库{' '}
+          <code className="rounded bg-red-100/80 px-1">program</code> 可连接）
         </div>
       ) : null}
 
       {loading ? (
-        <ul className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ul className="grid items-stretch gap-5 sm:grid-cols-1 lg:grid-cols-2">
           {Array.from({ length: 4 }).map((_, i) => (
-            <li key={i}>
+            <li key={i} className="flex">
               <CardSkeleton />
             </li>
           ))}
@@ -169,9 +173,9 @@ export function ActivitySearch() {
       ) : (
         <>
           <p className="mb-4 text-sm font-medium text-slate-500">共 {items.length} 场活动</p>
-          <ul className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-2">
+          <ul className="grid items-stretch gap-5 sm:grid-cols-1 lg:grid-cols-2">
             {items.map((a) => (
-              <li key={a.id} className="flex">
+              <li key={a.id} className="flex min-h-0">
                 <ActivityCard a={a} />
               </li>
             ))}

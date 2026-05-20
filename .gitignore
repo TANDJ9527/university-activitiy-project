@@ -5,19 +5,3 @@ server/.env
 *.log
 .DS_Store
 nul
-
-# AI Assistant directories
-.agent/
-.claude/
-.codebuddy/
-.codex/
-.continue/
-.cursor/
-.gemini/
-.github/prompts/
-.kiro/
-.opencode/
-.qoder/
-.roo/
-.trae/
-.windsurf/

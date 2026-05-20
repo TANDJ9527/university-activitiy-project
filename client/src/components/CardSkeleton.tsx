@@ -1,6 +1,6 @@
 export function CardSkeleton() {
   return (
-    <div className="h-[420px] animate-pulse overflow-hidden rounded-2xl bg-white/90 shadow-card ring-1 ring-slate-200/70">
+    <div className="h-full min-h-[21rem] w-full animate-pulse overflow-hidden rounded-2xl border border-slate-200/80 bg-white/90 shadow-md ring-1 ring-slate-200/80">
       <div className="h-2.5 bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 bg-[length:200%_100%] animate-shimmer" />
       <div className="space-y-4 p-5">
         <div className="flex gap-2">

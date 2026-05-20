@@ -1,21 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import {
-  deleteActivity,
-  getActivity,
-  getActivityComments,
-  createComment,
-  deleteComment,
-  createModerationRequest,
-  toggleFavorite,
-} from '../api'
+import { deleteActivity, getActivity } from '../api'
+import { FavoriteStarButton } from '../components/FavoriteStarButton'
 import { useAuth } from '../context/AuthContext'
 import { formatRange } from '../lib/dates'
 import { badgeClass, barClass } from '../lib/categoryStyles'
-import { publisherChannelLabel, roleLabel, needsActivityModeration } from '../types'
-import type { Comment } from '../types'
-import { formField, formSubmitButton, errorMessage } from '../lib/styles'
-import { Star } from 'lucide-react'
+import { publisherChannelLabel, roleLabel } from '../types'
 
 function DetailSkeleton() {
   return (
@@ -39,20 +29,6 @@ export function ActivityDetail() {
   const [err, setErr] = useState<string | null>(null)
   const [activity, setActivity] = useState<Awaited<ReturnType<typeof getActivity>> | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const [comments, setComments] = useState<Comment[]>([])
-  const [loadingComments, setLoadingComments] = useState(false)
-  const [commentContent, setCommentContent] = useState('')
-  const [submittingComment, setSubmittingComment] = useState(false)
-  const [commentError, setCommentError] = useState<string | null>(null)
-  const [favorited, setFavorited] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
-  const [requestingDelete, setRequestingDelete] = useState(false)
-
-  useEffect(() => {
-    if (!toast) return
-    const t = window.setTimeout(() => setToast(null), 2200)
-    return () => window.clearTimeout(t)
-  }, [toast])
 
   useEffect(() => {
     if (!id) return
@@ -62,20 +38,7 @@ export function ActivityDetail() {
       setErr(null)
       try {
         const a = await getActivity(id)
-        if (!cancelled) {
-          setActivity(a)
-          setFavorited(Boolean(a.favorited))
-        }
-
-        setLoadingComments(true)
-        try {
-          const c = await getActivityComments(id)
-          if (!cancelled) setComments(c)
-        } catch (e) {
-          console.error('加载评论失败:', e)
-        } finally {
-          if (!cancelled) setLoadingComments(false)
-        }
+        if (!cancelled) setActivity(a)
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : '加载失败')
       } finally {
@@ -87,40 +50,14 @@ export function ActivityDetail() {
     }
   }, [id])
 
-  async function handleFavoriteClick() {
-    if (!id) return
-    if (!user) {
-      setToast('请先登录后再收藏')
-      return
-    }
-    try {
-      const { favorited: next } = await toggleFavorite(id)
-      setFavorited(next)
-      setToast(next ? '收藏成功' : '已取消收藏')
-    } catch (e) {
-      setToast(e instanceof Error ? e.message : '操作失败')
-    }
-  }
-
-  async function handleRequestDelete() {
-    if (!id || !user || !activity) return
-    if (!window.confirm('确定提交删除申请？管理员通过后活动将从广场移除。')) return
-    setRequestingDelete(true)
-    try {
-      await createModerationRequest({ type: 'delete', activityId: id })
-      setToast('删除申请已提交，请等待管理员审核')
-    } catch (e) {
-      alert(e instanceof Error ? e.message : '提交失败')
-    } finally {
-      setRequestingDelete(false)
-    }
-  }
+  const canManage =
+    ready &&
+    user &&
+    activity &&
+    (activity.author.id === user.id || user.isPlatformAdmin)
 
   async function handleDelete() {
-    if (!id || !user || !activity) return
-    const canDirectDelete =
-      user.isPlatformAdmin || (activity.author.id === user.id && user.role === 'school')
-    if (!canDirectDelete) return
+    if (!id || !canManage) return
     if (!window.confirm('确定删除该活动？此操作不可恢复。')) return
     setDeleting(true)
     try {
@@ -130,34 +67,6 @@ export function ActivityDetail() {
       alert(e instanceof Error ? e.message : '删除失败')
     } finally {
       setDeleting(false)
-    }
-  }
-
-  async function handleCommentSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!id || !user || !commentContent.trim()) return
-
-    setSubmittingComment(true)
-    setCommentError(null)
-    try {
-      const newComment = await createComment(id, commentContent.trim())
-      setComments([...comments, newComment])
-      setCommentContent('')
-    } catch (e) {
-      setCommentError(e instanceof Error ? e.message : '发布评论失败')
-    } finally {
-      setSubmittingComment(false)
-    }
-  }
-
-  async function handleCommentDelete(commentId: string) {
-    if (!window.confirm('确定删除该评论？此操作不可恢复。')) return
-
-    try {
-      await deleteComment(commentId)
-      setComments(comments.filter((c) => c.id !== commentId))
-    } catch (e) {
-      alert(e instanceof Error ? e.message : '删除评论失败')
     }
   }
 
@@ -180,36 +89,12 @@ export function ActivityDetail() {
   const bar = barClass(a.category)
   const badge = badgeClass(a.category)
 
-  const isAuthor = Boolean(user && a.author.id === user.id)
-  const canEdit = Boolean(user && (user.isPlatformAdmin || isAuthor))
-  const showDirectDelete = Boolean(
-    user && (user.isPlatformAdmin || (isAuthor && user.role === 'school'))
-  )
-  const showStudentRequestDelete = Boolean(user && isAuthor && needsActivityModeration(user))
-
   return (
-    <article className="relative overflow-hidden rounded-3xl border border-white/70 bg-white/80 shadow-xl shadow-slate-900/8 ring-1 ring-slate-200/60 backdrop-blur-md">
-      {toast ? (
-        <div
-          role="status"
-          className="fixed bottom-8 left-1/2 z-50 -translate-x-1/2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-medium text-white shadow-lg"
-        >
-          {toast}
-        </div>
-      ) : null}
+    <article className="overflow-hidden rounded-3xl border border-white/70 bg-white/80 shadow-xl shadow-slate-900/8 ring-1 ring-slate-200/60 backdrop-blur-md">
       <div className={`h-2 bg-gradient-to-r ${bar}`} aria-hidden />
       <div className="p-6 sm:p-10">
         <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-          <div className="relative max-w-3xl pr-14">
-            <button
-              type="button"
-              onClick={handleFavoriteClick}
-              className="absolute right-0 top-0 flex h-10 w-10 items-center justify-center rounded-full border border-amber-200/80 bg-amber-50/90 text-amber-600 shadow-sm transition hover:bg-amber-100 hover:text-amber-700"
-              title={favorited ? '取消收藏' : '收藏活动'}
-              aria-label={favorited ? '取消收藏' : '收藏活动'}
-            >
-              <Star className={`h-5 w-5 ${favorited ? 'fill-amber-500 text-amber-600' : ''}`} strokeWidth={2} />
-            </button>
+          <div className="max-w-3xl">
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${badge}`}>
                 {a.category}
@@ -237,49 +122,43 @@ export function ActivityDetail() {
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:flex-col sm:items-stretch sm:gap-2 md:flex-row md:items-center">
+            <FavoriteStarButton
+              activityId={a.id}
+              favorited={a.favorited}
+              onChange={(fav) => setActivity((prev) => (prev ? { ...prev, favorited: fav } : prev))}
+            />
             <Link
               to="/"
               className="rounded-full border border-slate-200/90 bg-white px-4 py-2 text-center text-sm font-semibold text-slate-800 no-underline shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/30"
             >
               ← 返回广场
             </Link>
-            {canEdit ? (
-              <Link
-                to={`/activity/${id}/edit`}
-                className="rounded-full bg-gradient-to-r from-slate-800 to-slate-900 px-4 py-2 text-center text-sm font-semibold text-white no-underline shadow-md transition hover:from-slate-700 hover:to-slate-800"
-              >
-                {isAuthor && needsActivityModeration(user) ? '申请编辑' : '编辑'}
-              </Link>
-            ) : null}
-            {showDirectDelete ? (
-              <button
-                type="button"
-                disabled={deleting}
-                onClick={handleDelete}
-                className="rounded-full border border-red-200 bg-red-50/90 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 disabled:opacity-50"
-              >
-                {deleting ? '删除中…' : '删除'}
-              </button>
-            ) : null}
-            {showStudentRequestDelete ? (
-              <button
-                type="button"
-                disabled={requestingDelete}
-                onClick={handleRequestDelete}
-                className="rounded-full border border-amber-300 bg-amber-50/90 px-4 py-2 text-sm font-semibold text-amber-950 transition hover:bg-amber-100 disabled:opacity-50"
-              >
-                {requestingDelete ? '提交中…' : '申请删除'}
-              </button>
-            ) : null}
-            {!canEdit && !showDirectDelete && !showStudentRequestDelete ? (
+            {canManage ? (
+              <>
+                <Link
+                  to={`/activity/${id}/edit`}
+                  className="rounded-full bg-gradient-to-r from-slate-800 to-slate-900 px-4 py-2 text-center text-sm font-semibold text-white no-underline shadow-md transition hover:from-slate-700 hover:to-slate-800"
+                >
+                  编辑
+                </Link>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={handleDelete}
+                  className="rounded-full border border-red-200 bg-red-50/90 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 disabled:opacity-50"
+                >
+                  {deleting ? '删除中…' : '删除'}
+                </button>
+              </>
+            ) : (
               <p className="max-w-[220px] text-xs leading-relaxed text-slate-500">
                 {ready && !user
-                  ? '登录后可收藏活动；发布者或平台管理员可管理活动。'
-                  : !user?.isPlatformAdmin && !isAuthor
+                  ? '登录后，发布者或平台管理员可编辑或删除。'
+                  : !user?.isPlatformAdmin
                     ? '你不是该活动的发布者，亦非平台管理员。'
                     : null}
               </p>
-            ) : null}
+            )}
           </div>
         </div>
 
@@ -303,105 +182,6 @@ export function ActivityDetail() {
           <div className="whitespace-pre-wrap rounded-2xl border border-slate-100 bg-white/95 px-6 py-7 text-[1.02rem] leading-[1.75] text-slate-700 shadow-inner shadow-slate-900/5 ring-1 ring-slate-100/80">
             {a.description}
           </div>
-        </section>
-
-        <section className="mt-12">
-          <h2 className="font-display mb-6 text-xl font-semibold text-slate-900">评论</h2>
-
-          {ready && user ? (
-            <form onSubmit={handleCommentSubmit} className="mb-8 space-y-4">
-              {commentError ? <div className={errorMessage}>{commentError}</div> : null}
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold text-slate-700">发表评论</span>
-                <textarea
-                  value={commentContent}
-                  onChange={(e) => setCommentContent(e.target.value)}
-                  disabled={submittingComment}
-                  maxLength={2000}
-                  rows={4}
-                  placeholder="分享你的想法..."
-                  className={`${formField} resize-y min-h-[120px]`}
-                />
-                <p className="mt-1 text-xs text-slate-500">{commentContent.length}/2000</p>
-              </label>
-              <button
-                type="submit"
-                disabled={submittingComment || !commentContent.trim()}
-                className={formSubmitButton}
-              >
-                {submittingComment ? '提交中…' : '发布评论'}
-              </button>
-            </form>
-          ) : (
-            <div className="mb-8 rounded-2xl border border-slate-100 bg-slate-50/90 p-6 text-center text-slate-600">
-              <p className="mb-4">登录后才能发表评论</p>
-              <Link
-                to="/login"
-                className="inline-block rounded-full bg-gradient-to-r from-indigo-600 to-sky-600 px-6 py-2 font-semibold text-white shadow-md transition hover:to-indigo-600"
-              >
-                去登录
-              </Link>
-            </div>
-          )}
-
-          {loadingComments ? (
-            <div className="animate-pulse space-y-4">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="rounded-2xl border border-slate-100 bg-white p-4">
-                  <div className="mb-2 flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-full bg-slate-200" />
-                    <div className="space-y-1">
-                      <div className="h-3 w-24 rounded bg-slate-200" />
-                      <div className="h-2 w-40 rounded bg-slate-100" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="h-2 w-full rounded bg-slate-200" />
-                    <div className="h-2 w-3/4 rounded bg-slate-200" />
-                    <div className="h-2 w-1/2 rounded bg-slate-200" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : comments.length > 0 ? (
-            <div className="space-y-4">
-              {comments.map((comment) => {
-                const canDeleteComment =
-                  ready && user && (comment.author.id === user.id || user.isPlatformAdmin)
-                return (
-                  <div key={comment.id} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-                    <div className="mb-3 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-r from-indigo-500 to-sky-500 font-semibold text-white">
-                          {comment.author.displayName.charAt(0)}
-                        </div>
-                        <div>
-                          <div className="text-sm font-semibold text-slate-900">{comment.author.displayName}</div>
-                          <div className="text-xs text-slate-500">
-                            {roleLabel(comment.author.role)} · {new Date(comment.createdAt).toLocaleString()}
-                          </div>
-                        </div>
-                      </div>
-                      {canDeleteComment ? (
-                        <button
-                          type="button"
-                          onClick={() => handleCommentDelete(comment.id)}
-                          className="rounded-full bg-red-50/90 px-3 py-1 text-xs font-semibold text-red-800 transition hover:bg-red-100"
-                        >
-                          删除
-                        </button>
-                      ) : null}
-                    </div>
-                    <div className="text-sm leading-relaxed text-slate-700">{comment.content}</div>
-                  </div>
-                )
-              })}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-slate-100 bg-slate-50/90 p-8 text-center text-slate-600">
-              <p>暂无评论，快来发表第一条评论吧！</p>
-            </div>
-          )}
         </section>
       </div>
     </article>

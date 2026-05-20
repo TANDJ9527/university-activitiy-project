@@ -17,9 +17,10 @@ export function AdminModeration() {
     setErr(null)
     try {
       const data = await listPendingModeration()
-      setItems(data)
+      setItems(Array.isArray(data) ? data : [])
     } catch (e) {
       setErr(e instanceof Error ? e.message : '加载失败')
+      setItems([])
     } finally {
       setLoading(false)
     }

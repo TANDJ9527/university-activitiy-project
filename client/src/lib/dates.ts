@@ -1,4 +1,5 @@
-export function formatRange(startIso: string, endIso: string | null): string {
+export function formatRange(startIso: string | null | undefined, endIso: string | null | undefined): string {
+  if (!startIso) return '—'
   const opt: Intl.DateTimeFormatOptions = {
     year: 'numeric',
     month: 'short',
@@ -7,6 +8,7 @@ export function formatRange(startIso: string, endIso: string | null): string {
     minute: '2-digit',
   }
   const s = new Date(startIso)
+  if (Number.isNaN(s.getTime())) return '—'
   if (!endIso) return s.toLocaleString('zh-CN', opt)
   const e = new Date(endIso)
   if (s.toDateString() === e.toDateString()) {

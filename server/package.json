@@ -7,8 +7,9 @@
     "dev": "node --watch index-mysql.js",
     "start": "node index-mysql.js",
     "setup": "node setup.js",
-    "seed": "node seed.js",
-    "seed:mysql": "node seed-mysql.js"
+    "seed": "node seed-mysql.js",
+    "seed:mysql": "node seed-mysql.js",
+    "seed:json": "node seed.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

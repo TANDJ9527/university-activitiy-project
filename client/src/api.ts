@@ -82,8 +82,9 @@ export async function listActivities(params: {
     headers: { ...authHeaders() },
   })
   if (!res.ok) throw new Error(await parseError(res))
-  const data = (await res.json()) as { activities: Activity[] }
-  return data.activities
+  const data = (await res.json()) as Activity[] | { activities?: Activity[] }
+  if (Array.isArray(data)) return data
+  return Array.isArray(data.activities) ? data.activities : []
 }
 
 export async function getActivity(id: string): Promise<Activity> {
@@ -146,7 +147,8 @@ export async function deleteActivity(id: string): Promise<void> {
 export async function getActivityComments(activityId: string): Promise<Comment[]> {
   const res = await fetch(`/api/activities/${encodeURIComponent(activityId)}/comments`)
   if (!res.ok) throw new Error(await parseError(res))
-  const data = (await res.json()) as { comments?: Comment[] }
+  const data = (await res.json()) as Comment[] | { comments?: Comment[] }
+  if (Array.isArray(data)) return data
   return Array.isArray(data.comments) ? data.comments : []
 }
 
@@ -196,8 +198,8 @@ export async function createModerationRequest(body: {
 export async function listPendingModeration(): Promise<ModerationRequest[]> {
   const res = await fetch('/api/admin/moderation/pending', { headers: { ...authHeaders() } })
   if (!res.ok) throw new Error(await parseError(res))
-  const data = (await res.json()) as { requests: ModerationRequest[] }
-  return data.requests ?? []
+  const data = (await res.json()) as { requests?: ModerationRequest[] }
+  return Array.isArray(data.requests) ? data.requests : []
 }
 
 export async function approveModeration(id: string): Promise<{ request: ModerationRequest }> {
