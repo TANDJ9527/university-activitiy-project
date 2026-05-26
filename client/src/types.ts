@@ -31,6 +31,8 @@ export interface Activity {
   author: ActivityAuthor
   favorited?: boolean
   favoritedAt?: string | null
+  registered?: boolean
+  registeredAt?: string | null
 }
 
 export type ModerationType = 'create' | 'update' | 'delete'
@@ -59,11 +61,16 @@ export interface AuthUser {
   isPlatformAdmin: boolean
 }
 
+export type CommentStatus = 'pending' | 'approved' | 'rejected'
+
 export interface Comment {
   id: string
   content: string
   createdAt: string
+  status?: CommentStatus
   author: ActivityAuthor
+  activityId?: string
+  activityTitle?: string
 }
 
 /** 学生（非平台管理员）发布/改/删活动须走审核 */

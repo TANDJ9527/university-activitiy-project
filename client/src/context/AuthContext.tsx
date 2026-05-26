@@ -20,6 +20,7 @@ type AuthState = {
     password: string
     displayName: string
     role: 'student' | 'school'
+    code: string
   }) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
@@ -73,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password: string
       displayName: string
       role: 'student' | 'school'
+      code: string
     }) => {
       const { token, user: u } = await api.register(p)
       setToken(token)

@@ -1,10 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { deleteActivity, getActivity } from '../api'
+import {
+  createComment,
+  deleteComment,
+  deleteActivity,
+  getActivity,
+  getActivityComments,
+} from '../api'
+import { ActivityRegisterButton } from '../components/ActivityRegisterButton'
 import { FavoriteStarButton } from '../components/FavoriteStarButton'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { formatRange } from '../lib/dates'
+import { validateCommentText } from '../lib/qqEmail'
 import { badgeClass, barClass } from '../lib/categoryStyles'
+import type { Comment } from '../types'
 import { publisherChannelLabel, roleLabel } from '../types'
 
 function DetailSkeleton() {
@@ -25,36 +35,92 @@ export function ActivityDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { user, ready } = useAuth()
+  const { showToast } = useToast()
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const [activity, setActivity] = useState<Awaited<ReturnType<typeof getActivity>> | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [comments, setComments] = useState<Comment[]>([])
+  const [commentsLoading, setCommentsLoading] = useState(true)
+  const [commentText, setCommentText] = useState('')
+  const [commentBusy, setCommentBusy] = useState(false)
 
-  useEffect(() => {
+  const loadActivity = useCallback(async () => {
     if (!id) return
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      setErr(null)
-      try {
-        const a = await getActivity(id)
-        if (!cancelled) setActivity(a)
-      } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : '加载失败')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
+    setLoading(true)
+    setErr(null)
+    try {
+      const a = await getActivity(id)
+      setActivity(a)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : '加载失败')
+    } finally {
+      setLoading(false)
     }
   }, [id])
+
+  const loadComments = useCallback(async () => {
+    if (!id) return
+    setCommentsLoading(true)
+    try {
+      const list = await getActivityComments(id)
+      setComments(Array.isArray(list) ? list : [])
+    } catch {
+      setComments([])
+    } finally {
+      setCommentsLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => {
+    loadActivity()
+  }, [loadActivity, user?.id])
+
+  useEffect(() => {
+    loadComments()
+  }, [loadComments])
 
   const canManage =
     ready &&
     user &&
     activity &&
     (activity.author.id === user.id || user.isPlatformAdmin)
+
+  async function handleSubmitComment(e: FormEvent) {
+    e.preventDefault()
+    if (!id) return
+    if (!user) {
+      showToast('请先登录后再评论', 'info')
+      navigate('/login', { state: { from: `/activity/${id}` } })
+      return
+    }
+    const validationErr = validateCommentText(commentText)
+    if (validationErr) {
+      showToast(validationErr, 'error')
+      return
+    }
+    setCommentBusy(true)
+    try {
+      const res = await createComment(id, commentText.trim())
+      setCommentText('')
+      showToast(res.message || '评论已提交，等待管理员审核', 'success')
+    } catch (er) {
+      showToast(er instanceof Error ? er.message : '提交失败', 'error')
+    } finally {
+      setCommentBusy(false)
+    }
+  }
+
+  async function handleDeleteComment(commentId: string) {
+    if (!window.confirm('确定删除自己的这条评论？')) return
+    try {
+      await deleteComment(commentId)
+      showToast('评论已删除', 'success')
+      setComments((prev) => prev.filter((c) => c.id !== commentId))
+    } catch (er) {
+      showToast(er instanceof Error ? er.message : '删除失败', 'error')
+    }
+  }
 
   async function handleDelete() {
     if (!id || !canManage) return
@@ -122,6 +188,11 @@ export function ActivityDetail() {
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:flex-col sm:items-stretch sm:gap-2 md:flex-row md:items-center">
+            <ActivityRegisterButton
+              activityId={a.id}
+              registered={a.registered}
+              onChange={(reg) => setActivity((prev) => (prev ? { ...prev, registered: reg } : prev))}
+            />
             <FavoriteStarButton
               activityId={a.id}
               favorited={a.favorited}
@@ -177,11 +248,79 @@ export function ActivityDetail() {
           </div>
         </dl>
 
-        <section>
+        <section className="mb-10">
           <h2 className="font-display mb-4 text-xl font-semibold text-slate-900">活动说明</h2>
           <div className="whitespace-pre-wrap rounded-2xl border border-slate-100 bg-white/95 px-6 py-7 text-[1.02rem] leading-[1.75] text-slate-700 shadow-inner shadow-slate-900/5 ring-1 ring-slate-100/80">
             {a.description}
           </div>
+        </section>
+
+        <section className="border-t border-slate-200/80 pt-8">
+          <h2 className="font-display mb-2 text-xl font-semibold text-slate-900">评论区</h2>
+          <p className="mb-6 text-sm text-slate-500">仅显示已通过审核的评论。新评论需管理员审核后展示。</p>
+
+          {ready && user ? (
+            <form onSubmit={handleSubmitComment} className="mb-8 space-y-3">
+              <textarea
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                maxLength={2000}
+                rows={3}
+                placeholder="写下你的评论（中文、英文、数字及常用标点）"
+                className="w-full resize-y rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none ring-indigo-500/20 focus:border-indigo-400 focus:ring-2"
+              />
+              <button
+                type="submit"
+                disabled={commentBusy}
+                className="rounded-full bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
+              >
+                {commentBusy ? '提交中…' : '提交评论'}
+              </button>
+            </form>
+          ) : (
+            <p className="mb-6 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              <Link to="/login" state={{ from: `/activity/${id}` }} className="font-semibold text-indigo-700 underline">
+                登录
+              </Link>
+              后即可发表评论。
+            </p>
+          )}
+
+          {commentsLoading ? (
+            <p className="text-sm text-slate-500">加载评论…</p>
+          ) : comments.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-500">
+              暂无评论，来抢沙发吧。
+            </p>
+          ) : (
+            <ul className="space-y-4">
+              {comments.map((c) => (
+                <li
+                  key={c.id}
+                  className="rounded-2xl border border-slate-100 bg-slate-50/80 px-5 py-4"
+                >
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-700">
+                      {roleLabel(c.author.role)} · {c.author.displayName}
+                    </span>
+                    <span className="text-xs text-slate-400">
+                      {new Date(c.createdAt).toLocaleString('zh-CN', { hour12: false })}
+                    </span>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{c.content}</p>
+                  {user && c.author.id === user.id ? (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteComment(c.id)}
+                      className="mt-3 text-xs font-semibold text-red-700 hover:underline"
+                    >
+                      删除我的评论
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       </div>
     </article>

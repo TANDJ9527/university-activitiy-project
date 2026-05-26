@@ -121,6 +121,32 @@ async function initDatabase() {
     `);
 
     await query(`
+      CREATE TABLE IF NOT EXISTS activity_registrations (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        user_id CHAR(36) NOT NULL,
+        activity_id CHAR(36) NOT NULL,
+        created_at DATETIME(3) NOT NULL,
+        UNIQUE KEY uk_reg_user_activity (user_id, activity_id),
+        KEY idx_reg_user_created (user_id, created_at),
+        KEY idx_reg_activity (activity_id),
+        CONSTRAINT fk_reg_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_reg_activity FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS email_verification_codes (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        purpose ENUM('register', 'reset_password') NOT NULL,
+        code VARCHAR(6) NOT NULL,
+        expires_at DATETIME(3) NOT NULL,
+        created_at DATETIME(3) NOT NULL,
+        KEY idx_email_codes_email_purpose (email, purpose)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
+    await query(`
       CREATE TABLE IF NOT EXISTS moderation_requests (
         id CHAR(36) NOT NULL PRIMARY KEY,
         type ENUM('create','update','delete') NOT NULL,
@@ -138,6 +164,17 @@ async function initDatabase() {
         CONSTRAINT fk_mod_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE SET NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
+
+    try {
+      await query(`
+        ALTER TABLE comments
+        ADD COLUMN status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'approved'
+        AFTER content
+      `);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/Duplicate column/i.test(msg)) throw e;
+    }
 
     console.log('✅ 数据库表结构初始化完成');
   } catch (error) {

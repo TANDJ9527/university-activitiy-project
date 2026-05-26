@@ -40,13 +40,20 @@ export function Account() {
           <span className="text-sm font-bold text-amber-950">收藏的活动</span>
           <span className="mt-1 text-xs text-amber-900/80">按收藏时间查看与管理</span>
         </Link>
+        <Link
+          to="/account/registrations"
+          className="flex flex-col rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/90 to-white p-4 no-underline shadow-sm ring-1 ring-emerald-100/80 transition hover:border-emerald-300 hover:shadow-md"
+        >
+          <span className="text-sm font-bold text-emerald-950">报名的活动</span>
+          <span className="mt-1 text-xs text-emerald-900/80">查看或取消报名</span>
+        </Link>
         {user.isPlatformAdmin ? (
           <Link
             to="/admin/moderation"
-            className="flex flex-col rounded-2xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50/90 to-white p-4 no-underline shadow-sm ring-1 ring-indigo-100/80 transition hover:border-indigo-300 hover:shadow-md"
+            className="flex flex-col rounded-2xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50/90 to-white p-4 no-underline shadow-sm ring-1 ring-indigo-100/80 transition hover:border-indigo-300 hover:shadow-md sm:col-span-2"
           >
-            <span className="text-sm font-bold text-indigo-950">待审核</span>
-            <span className="mt-1 text-xs text-indigo-900/80">学生发布 / 修改 / 删除申请</span>
+            <span className="text-sm font-bold text-indigo-950">管理后台 · 待审核</span>
+            <span className="mt-1 text-xs text-indigo-900/80">活动申请与评论审核</span>
           </Link>
         ) : (
           <div className="rounded-2xl border border-slate-200/80 bg-slate-50/50 p-4 text-xs text-slate-500">

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toggleFavorite } from '../api'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 
 type Props = {
   activityId: string
@@ -20,6 +21,7 @@ export function FavoriteStarButton({
 }: Props) {
   const { user, ready } = useAuth()
   const navigate = useNavigate()
+  const { showToast } = useToast()
   const [favorited, setFavorited] = useState(favoritedProp)
   const [busy, setBusy] = useState(false)
 
@@ -31,6 +33,7 @@ export function FavoriteStarButton({
     e.preventDefault()
     e.stopPropagation()
     if (!ready || !user) {
+      showToast('请先登录', 'info')
       navigate('/login', { state: { from: window.location.pathname } })
       return
     }
@@ -40,8 +43,9 @@ export function FavoriteStarButton({
       const { favorited: next } = await toggleFavorite(activityId)
       setFavorited(next)
       onChange?.(next)
+      showToast(next ? '已收藏该活动' : '已取消收藏', 'success')
     } catch (err) {
-      alert(err instanceof Error ? err.message : '收藏操作失败')
+      showToast(err instanceof Error ? err.message : '收藏操作失败', 'error')
     } finally {
       setBusy(false)
     }

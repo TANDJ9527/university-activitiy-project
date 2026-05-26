@@ -67,7 +67,15 @@ export function Login() {
           />
         </label>
         <label className="block">
-          <span className="mb-1.5 block text-sm font-semibold text-slate-700">密码</span>
+          <span className="mb-1.5 flex items-center justify-between text-sm font-semibold text-slate-700">
+            <span>密码</span>
+            <Link
+              to="/forgot-password"
+              className="text-xs font-semibold text-indigo-600 no-underline hover:text-indigo-800"
+            >
+              忘记密码？
+            </Link>
+          </span>
           <input
             type="password"
             autoComplete="current-password"

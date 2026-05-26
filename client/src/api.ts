@@ -15,16 +15,44 @@ async function parseError(res: Response): Promise<string> {
   }
 }
 
+export async function sendEmailCode(
+  email: string,
+  purpose: 'register' | 'reset_password'
+): Promise<{ ok: boolean; message?: string; devCode?: string }> {
+  const res = await fetch('/api/auth/send-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email.trim().toLowerCase(), purpose }),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ ok: boolean; message?: string; devCode?: string }>
+}
+
+export async function resetPassword(body: {
+  email: string
+  code: string
+  password: string
+}): Promise<{ ok: boolean; message?: string }> {
+  const res = await fetch('/api/auth/reset-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ ok: boolean; message?: string }>
+}
+
 export async function register(body: {
   email: string
   password: string
   displayName: string
   role: 'student' | 'school'
+  code: string
 }): Promise<{ token: string; user: AuthUser }> {
   const res = await fetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, email: body.email.trim().toLowerCase() }),
   })
   if (!res.ok) throw new Error(await parseError(res))
   return res.json() as Promise<{ token: string; user: AuthUser }>
@@ -152,14 +180,17 @@ export async function getActivityComments(activityId: string): Promise<Comment[]
   return Array.isArray(data.comments) ? data.comments : []
 }
 
-export async function createComment(activityId: string, content: string): Promise<Comment> {
+export async function createComment(
+  activityId: string,
+  content: string
+): Promise<{ comment: Comment; message?: string }> {
   const res = await fetch(`/api/activities/${encodeURIComponent(activityId)}/comments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ content }),
   })
   if (!res.ok) throw new Error(await parseError(res))
-  return res.json() as Promise<Comment>
+  return res.json() as Promise<{ comment: Comment; message?: string }>
 }
 
 export async function deleteComment(commentId: string): Promise<void> {
@@ -242,6 +273,56 @@ export async function listMyFavorites(): Promise<Activity[]> {
 
 export async function clearAllFavorites(): Promise<void> {
   const res = await fetch('/api/me/favorites', {
+    method: 'DELETE',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+}
+
+export async function registerForActivity(activityId: string): Promise<{ registered: boolean; message?: string }> {
+  const res = await fetch(`/api/activities/${encodeURIComponent(activityId)}/register`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ registered: boolean; message?: string }>
+}
+
+export async function cancelActivityRegistration(
+  activityId: string
+): Promise<{ registered: boolean; message?: string }> {
+  const res = await fetch(`/api/activities/${encodeURIComponent(activityId)}/register`, {
+    method: 'DELETE',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ registered: boolean; message?: string }>
+}
+
+export async function listMyRegistrations(): Promise<Activity[]> {
+  const res = await fetch('/api/me/registrations', { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = (await res.json()) as { activities?: Activity[] }
+  return data.activities ?? []
+}
+
+export async function listPendingComments(): Promise<Comment[]> {
+  const res = await fetch('/api/admin/comments/pending', { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = (await res.json()) as { comments?: Comment[] }
+  return data.comments ?? []
+}
+
+export async function approveComment(commentId: string): Promise<void> {
+  const res = await fetch(`/api/admin/comments/${encodeURIComponent(commentId)}/approve`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+}
+
+export async function adminDeleteComment(commentId: string): Promise<void> {
+  const res = await fetch(`/api/admin/comments/${encodeURIComponent(commentId)}`, {
     method: 'DELETE',
     headers: { ...authHeaders() },
   })

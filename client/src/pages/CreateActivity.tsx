@@ -11,7 +11,10 @@ export function CreateActivity() {
   const navigate = useNavigate()
 
   if (!ready) return <p className="text-slate-500">加载中…</p>
-  if (!user) return <Navigate to="/login" replace state={{ from: '/publish' }} />
+  if (!user) {
+    const from = '/apply'
+    return <Navigate to="/login" replace state={{ from }} />
+  }
 
   const roleBadge = user.role === 'school' 
     ? { text: '校方 / 组织方', color: 'bg-indigo-50 text-indigo-700 ring-indigo-200' }

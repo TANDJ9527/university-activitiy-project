@@ -1,6 +1,6 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { roleLabel } from '../types'
+import { needsActivityModeration, roleLabel } from '../types'
 
 export function Layout() {
   const { user, ready, logout } = useAuth()
@@ -88,10 +88,10 @@ export function Layout() {
                     ) : null}
                   </Link>
                   <Link
-                    to="/publish"
+                    to={needsActivityModeration(user) ? '/apply' : '/publish'}
                     className="rounded-full bg-gradient-to-r from-indigo-600 to-sky-600 px-5 py-2 text-sm font-semibold text-white no-underline shadow-md shadow-indigo-500/25 transition hover:to-indigo-600 hover:shadow-lg"
                   >
-                    发布活动
+                    {needsActivityModeration(user) ? '提交活动审核' : '发布活动'}
                   </Link>
                   <button
                     type="button"

@@ -4,6 +4,7 @@ import { listActivities } from '../api'
 import { ActivityCard } from '../components/ActivityCard'
 import { CardSkeleton } from '../components/CardSkeleton'
 import { useAuth } from '../context/AuthContext'
+import { needsActivityModeration } from '../types'
 
 /** 广场固定：展示全部活动，按开始时间升序 */
 export function Home() {
@@ -109,10 +110,10 @@ export function Home() {
           <p className="mt-2 text-sm text-slate-600">成为第一个发布者，或稍后再来看看。</p>
           {ready && user ? (
             <Link
-              to="/publish"
+              to={needsActivityModeration(user) ? '/apply' : '/publish'}
               className="mt-6 inline-flex rounded-full bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white no-underline shadow-lg shadow-indigo-500/20"
             >
-              发布活动
+              {needsActivityModeration(user) ? '提交活动审核' : '发布活动'}
             </Link>
           ) : (
             <p className="mt-4 text-sm text-slate-600">可在页面顶部注册或登录后发布活动。</p>

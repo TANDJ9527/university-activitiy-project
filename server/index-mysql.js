@@ -4,6 +4,9 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
 import { query, testConnection, initDatabase } from "./mysql.js";
+import { isQqEmail, validateCommentContent } from "./validators.js";
+import { issueEmailCode, consumeEmailCode } from "./emailCodes.js";
+import { applyModerationRequest, mapModerationRow } from "./moderation.js";
 
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
@@ -29,6 +32,35 @@ async function isPlatformAdmin(userId) {
   return admins.length > 0;
 }
 
+async function canDirectPublishActivities(userId) {
+  if (await isPlatformAdmin(userId)) return true;
+  const users = await query("SELECT role FROM users WHERE id = ?", [userId]);
+  return users.length > 0 && users[0].role === "school";
+}
+
+function adminOnly(req, res, next) {
+  isPlatformAdmin(req.user.id)
+    .then((ok) => {
+      if (!ok) return res.status(403).json({ error: "仅平台管理员可访问" });
+      next();
+    })
+    .catch(() => res.status(500).json({ error: "权限校验失败" }));
+}
+
+function mapCommentRow(row) {
+  return {
+    id: row.id,
+    content: row.content,
+    status: row.status || "approved",
+    createdAt: toIso(row.created_at),
+    author: {
+      id: row.user_id,
+      displayName: row.display_name,
+      role: row.role,
+    },
+  };
+}
+
 function signUserToken(user) {
   return jwt.sign(
     { sub: user.id, email: user.email, role: user.role },
@@ -50,7 +82,10 @@ function mysqlDateTime3(d = new Date()) {
   return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())} ${pad(x.getHours())}:${pad(x.getMinutes())}:${pad(x.getSeconds())}.${String(x.getMilliseconds()).padStart(3, "0")}`;
 }
 
-function mapActivityFromRow(row, { favorited = false, favoritedAt = null } = {}) {
+function mapActivityFromRow(
+  row,
+  { favorited = false, favoritedAt = null, registered = false, registeredAt = null } = {}
+) {
   return {
     id: row.id,
     title: row.title,
@@ -66,6 +101,8 @@ function mapActivityFromRow(row, { favorited = false, favoritedAt = null } = {})
     publisherRole: row.publisher_role,
     favorited: !!favorited,
     favoritedAt: favoritedAt ? toIso(favoritedAt) : null,
+    registered: !!registered,
+    registeredAt: registeredAt ? toIso(registeredAt) : null,
     author: {
       id: row.user_id,
       displayName: row.author_display_name,
@@ -108,17 +145,35 @@ app.get("/api/health", async (_req, res) => {
   }
 });
 
-// 用户注册
+// 发送邮箱验证码（注册 / 找回密码）
+app.post("/api/auth/send-code", async (req, res) => {
+  try {
+    const email = String(req.body?.email || "")
+      .trim()
+      .toLowerCase();
+    const purpose = req.body?.purpose === "reset_password" ? "reset_password" : "register";
+    const result = await issueEmailCode(email, purpose);
+    res.json(result);
+  } catch (e) {
+    const status = e.status || 500;
+    return res.status(status).json({ error: e.message || "发送验证码失败" });
+  }
+});
+
+// 用户注册（须 QQ 邮箱 + 验证码）
 app.post("/api/auth/register", async (req, res) => {
   const body = req.body || {};
-  const email = String(body.email || "").trim().toLowerCase();
+  const email = String(body.email || "")
+    .trim()
+    .toLowerCase();
   const password = String(body.password || "");
   const displayName = String(body.displayName || "").trim();
+  const code = String(body.code || "").trim();
   const roleRaw = String(body.role || "student").toLowerCase();
   const role = roleRaw === "school" ? "school" : "student";
 
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: "请填写有效邮箱" });
+  if (!isQqEmail(email)) {
+    return res.status(400).json({ error: "请使用 QQ 邮箱注册（例如 123456789@qq.com）" });
   }
   if (password.length < 6) return res.status(400).json({ error: "密码至少 6 位" });
   if (!displayName || displayName.length > 100) {
@@ -126,6 +181,8 @@ app.post("/api/auth/register", async (req, res) => {
   }
 
   try {
+    await consumeEmailCode(email, "register", code);
+
     const existingUsers = await query("SELECT id FROM users WHERE email = ?", [email]);
     if (existingUsers.length > 0) {
       return res.status(409).json({ error: "该邮箱已注册" });
@@ -133,7 +190,7 @@ app.post("/api/auth/register", async (req, res) => {
 
     const id = randomUUID();
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const now = new Date().toISOString();
+    const now = mysqlDateTime3();
 
     await query(
       "INSERT INTO users (id, email, password_hash, display_name, role, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -144,8 +201,37 @@ app.post("/api/auth/register", async (req, res) => {
     const token = signUserToken(user);
     res.status(201).json({ token, user });
   } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: "注册失败" });
+    const status = e.status || 500;
+    if (!e.status) console.error(e);
+    return res.status(status).json({ error: e.message || "注册失败" });
+  }
+});
+
+// 忘记密码：验证码通过后重置
+app.post("/api/auth/reset-password", async (req, res) => {
+  const email = String(req.body?.email || "")
+    .trim()
+    .toLowerCase();
+  const code = String(req.body?.code || "").trim();
+  const password = String(req.body?.password || "");
+
+  if (!isQqEmail(email)) {
+    return res.status(400).json({ error: "请使用注册时的 QQ 邮箱" });
+  }
+  if (password.length < 6) return res.status(400).json({ error: "新密码至少 6 位" });
+
+  try {
+    await consumeEmailCode(email, "reset_password", code);
+    const users = await query("SELECT id FROM users WHERE email = ?", [email]);
+    if (users.length === 0) return res.status(404).json({ error: "该邮箱尚未注册" });
+
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    await query("UPDATE users SET password_hash = ? WHERE id = ?", [passwordHash, users[0].id]);
+    res.json({ ok: true, message: "密码已重置，请使用新密码登录" });
+  } catch (e) {
+    const status = e.status || 500;
+    if (!e.status) console.error(e);
+    return res.status(status).json({ error: e.message || "重置失败" });
   }
 });
 
@@ -197,6 +283,27 @@ app.get("/api/auth/me", authMiddleware(true), async (req, res) => {
   }
 });
 
+app.put("/api/auth/me", authMiddleware(true), async (req, res) => {
+  const displayName = String(req.body?.displayName || "").trim();
+  if (!displayName || displayName.length > 100) {
+    return res.status(400).json({ error: "昵称须为 1–100 字" });
+  }
+  try {
+    await query("UPDATE users SET display_name = ? WHERE id = ?", [displayName, req.user.id]);
+    const users = await query("SELECT email, role FROM users WHERE id = ?", [req.user.id]);
+    const publicUser = await userPublicFields(
+      req.user.id,
+      users[0].email,
+      displayName,
+      users[0].role
+    );
+    res.json({ user: publicUser });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "更新资料失败" });
+  }
+});
+
 // 获取活动列表
 app.get("/api/activities", authMiddleware(false), async (req, res) => {
   try {
@@ -205,7 +312,7 @@ app.get("/api/activities", authMiddleware(false), async (req, res) => {
       SELECT a.*, u.display_name as author_display_name, u.role as author_role
     `;
     if (userId) {
-      sql += `, f.id as favorite_id, f.created_at as favorited_at`;
+      sql += `, f.id as favorite_id, f.created_at as favorited_at, r.id as registration_id, r.created_at as registered_at`;
     }
     sql += `
       FROM activities a
@@ -214,7 +321,8 @@ app.get("/api/activities", authMiddleware(false), async (req, res) => {
     const params = [];
     if (userId) {
       sql += ` LEFT JOIN activity_favorites f ON f.activity_id = a.id AND f.user_id = ?`;
-      params.push(userId);
+      sql += ` LEFT JOIN activity_registrations r ON r.activity_id = a.id AND r.user_id = ?`;
+      params.push(userId, userId);
     }
     const where = [];
 
@@ -258,6 +366,8 @@ app.get("/api/activities", authMiddleware(false), async (req, res) => {
       mapActivityFromRow(row, {
         favorited: !!row.favorite_id,
         favoritedAt: row.favorited_at,
+        registered: !!row.registration_id,
+        registeredAt: row.registered_at,
       })
     );
 
@@ -277,7 +387,7 @@ app.get("/api/activities/:id", authMiddleware(false), async (req, res) => {
     `;
     const params = [req.params.id];
     if (userId) {
-      sql += `, f.id as favorite_id, f.created_at as favorited_at`;
+      sql += `, f.id as favorite_id, f.created_at as favorited_at, r.id as registration_id, r.created_at as registered_at`;
     }
     sql += `
       FROM activities a
@@ -285,7 +395,8 @@ app.get("/api/activities/:id", authMiddleware(false), async (req, res) => {
     `;
     if (userId) {
       sql += ` LEFT JOIN activity_favorites f ON f.activity_id = a.id AND f.user_id = ?`;
-      params.unshift(userId);
+      sql += ` LEFT JOIN activity_registrations r ON r.activity_id = a.id AND r.user_id = ?`;
+      params.unshift(userId, userId);
     }
     sql += ` WHERE a.id = ?`;
 
@@ -300,6 +411,8 @@ app.get("/api/activities/:id", authMiddleware(false), async (req, res) => {
       mapActivityFromRow(row, {
         favorited: !!row.favorite_id,
         favoritedAt: row.favorited_at,
+        registered: !!row.registration_id,
+        registeredAt: row.registered_at,
       })
     );
   } catch (e) {
@@ -310,6 +423,12 @@ app.get("/api/activities/:id", authMiddleware(false), async (req, res) => {
 
 // 创建活动
 app.post("/api/activities", authMiddleware(true), async (req, res) => {
+  if (!(await canDirectPublishActivities(req.user.id))) {
+    return res.status(403).json({
+      error: "学生发布活动请使用「发布活动」提交审核，不能直接发布",
+    });
+  }
+
   const body = req.body || {};
   const title = String(body.title || "").trim();
   const description = String(body.description || "").trim();
@@ -401,6 +520,9 @@ app.put("/api/activities/:id", authMiddleware(true), async (req, res) => {
     if (existing.user_id !== req.user.id && !admin) {
       return res.status(403).json({ error: "只有发布者或平台管理员可以修改该活动" });
     }
+    if (existing.user_id === req.user.id && !(await canDirectPublishActivities(req.user.id))) {
+      return res.status(403).json({ error: "学生修改活动请提交审核申请" });
+    }
 
     const body = req.body || {};
     const title = body.title !== undefined ? String(body.title).trim() : existing.title;
@@ -474,6 +596,9 @@ app.delete("/api/activities/:id", authMiddleware(true), async (req, res) => {
     if (existing.user_id !== req.user.id && !admin) {
       return res.status(403).json({ error: "只有发布者或平台管理员可以删除该活动" });
     }
+    if (existing.user_id === req.user.id && !(await canDirectPublishActivities(req.user.id))) {
+      return res.status(403).json({ error: "学生删除活动请提交审核申请" });
+    }
 
     await query("DELETE FROM activities WHERE id = ?", [req.params.id]);
     res.status(204).send();
@@ -491,26 +616,18 @@ app.get("/api/activities/:id/comments", async (req, res) => {
       return res.status(404).json({ error: "活动不存在" });
     }
 
-    const comments = await query(`
+    const comments = await query(
+      `
       SELECT c.*, u.display_name, u.role
       FROM comments c
       LEFT JOIN users u ON c.user_id = u.id
-      WHERE c.activity_id = ?
+      WHERE c.activity_id = ? AND c.status = 'approved'
       ORDER BY c.created_at DESC
-    `, [req.params.id]);
+    `,
+      [req.params.id]
+    );
 
-    const mappedComments = comments.map(comment => ({
-      id: comment.id,
-      content: comment.content,
-      createdAt: comment.created_at,
-      author: {
-        id: comment.user_id,
-        displayName: comment.display_name,
-        role: comment.role,
-      },
-    }));
-
-    res.json({ comments: mappedComments });
+    res.json({ comments: comments.map(mapCommentRow) });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "获取评论失败" });
@@ -525,39 +642,32 @@ app.post("/api/activities/:id/comments", authMiddleware(true), async (req, res) 
       return res.status(404).json({ error: "活动不存在" });
     }
 
-    const content = String(req.body.content || "").trim();
-    if (!content) return res.status(400).json({ error: "评论内容不能为空" });
-    if (content.length > 2000) return res.status(400).json({ error: "评论内容不能超过 2000 字" });
+    const validated = validateCommentContent(req.body.content);
+    if (!validated.ok) return res.status(400).json({ error: validated.error });
 
     const id = randomUUID();
-    const now = new Date().toISOString();
+    const now = mysqlDateTime3();
 
-    await query(`
-      INSERT INTO comments (id, activity_id, user_id, content, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `, [id, req.params.id, req.user.id, content, now]);
+    await query(
+      `INSERT INTO comments (id, activity_id, user_id, content, status, created_at)
+       VALUES (?, ?, ?, ?, 'pending', ?)`,
+      [id, req.params.id, req.user.id, validated.content, now]
+    );
 
-    // 获取创建的评论信息
-    const comments = await query(`
+    const comments = await query(
+      `
       SELECT c.*, u.display_name, u.role
       FROM comments c
       LEFT JOIN users u ON c.user_id = u.id
       WHERE c.id = ?
-    `, [id]);
+    `,
+      [id]
+    );
 
-    const comment = comments[0];
-    const responseComment = {
-      id: comment.id,
-      content: comment.content,
-      createdAt: comment.created_at,
-      author: {
-        id: comment.user_id,
-        displayName: comment.display_name,
-        role: comment.role,
-      },
-    };
-
-    res.status(201).json(responseComment);
+    res.status(201).json({
+      comment: mapCommentRow(comments[0]),
+      message: "评论已提交，管理员审核通过后将显示在评论区",
+    });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "发表评论失败" });
@@ -574,8 +684,8 @@ app.delete("/api/comments/:id", authMiddleware(true), async (req, res) => {
 
     const comment = comments[0];
     const admin = await isPlatformAdmin(req.user.id);
-    if (comment.user_id !== req.user.id && !admin) {
-      return res.status(403).json({ error: "只有评论作者或平台管理员可以删除该评论" });
+    if (!admin && comment.user_id !== req.user.id) {
+      return res.status(403).json({ error: "只能删除自己的评论" });
     }
 
     await query("DELETE FROM comments WHERE id = ?", [req.params.id]);
@@ -651,6 +761,215 @@ app.delete("/api/me/favorites", authMiddleware(true), async (req, res) => {
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "清空收藏失败" });
+  }
+});
+
+// 报名活动
+app.post("/api/activities/:id/register", authMiddleware(true), async (req, res) => {
+  try {
+    const activities = await query("SELECT id FROM activities WHERE id = ?", [req.params.id]);
+    if (activities.length === 0) return res.status(404).json({ error: "活动不存在" });
+
+    const existing = await query(
+      "SELECT id FROM activity_registrations WHERE user_id = ? AND activity_id = ?",
+      [req.user.id, req.params.id]
+    );
+    if (existing.length > 0) {
+      return res.status(409).json({ error: "您已报名该活动", registered: true });
+    }
+
+    await query(
+      "INSERT INTO activity_registrations (id, user_id, activity_id, created_at) VALUES (?, ?, ?, ?)",
+      [randomUUID(), req.user.id, req.params.id, mysqlDateTime3()]
+    );
+    res.status(201).json({ registered: true, message: "报名成功" });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "报名失败" });
+  }
+});
+
+// 取消报名
+app.delete("/api/activities/:id/register", authMiddleware(true), async (req, res) => {
+  try {
+    const result = await query(
+      "DELETE FROM activity_registrations WHERE user_id = ? AND activity_id = ?",
+      [req.user.id, req.params.id]
+    );
+    const affected = result?.affectedRows ?? 0;
+    if (affected === 0) {
+      return res.status(404).json({ error: "您尚未报名该活动" });
+    }
+    res.json({ registered: false, message: "已取消报名" });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "取消报名失败" });
+  }
+});
+
+// 我的报名列表
+app.get("/api/me/registrations", authMiddleware(true), async (req, res) => {
+  try {
+    const rows = await query(
+      `
+      SELECT a.*, u.display_name as author_display_name, u.role as author_role, r.created_at as registered_at
+      FROM activity_registrations r
+      INNER JOIN activities a ON a.id = r.activity_id
+      LEFT JOIN users u ON a.user_id = u.id
+      WHERE r.user_id = ?
+      ORDER BY r.created_at DESC
+    `,
+      [req.user.id]
+    );
+    const activities = rows.map((row) =>
+      mapActivityFromRow(row, { registered: true, registeredAt: row.registered_at })
+    );
+    res.json({ activities });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "获取报名列表失败" });
+  }
+});
+
+// 学生活动审核申请
+app.post("/api/moderation/requests", authMiddleware(true), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const type = body.type;
+    if (!["create", "update", "delete"].includes(type)) {
+      return res.status(400).json({ error: "无效的申请类型" });
+    }
+
+    const admin = await isPlatformAdmin(req.user.id);
+    const canSchool = await canDirectPublishActivities(req.user.id);
+    if (canSchool || admin) {
+      return res.status(400).json({ error: "校方或管理员请直接发布/修改活动" });
+    }
+
+    const id = randomUUID();
+    const now = mysqlDateTime3();
+    const payload = body.payload ? JSON.stringify(body.payload) : null;
+    const activityId = body.activityId || null;
+
+    if (type !== "create" && !activityId) {
+      return res.status(400).json({ error: "请指定活动 ID" });
+    }
+
+    if (type !== "create") {
+      const acts = await query("SELECT user_id FROM activities WHERE id = ?", [activityId]);
+      if (acts.length === 0) return res.status(404).json({ error: "活动不存在" });
+      if (acts[0].user_id !== req.user.id) {
+        return res.status(403).json({ error: "只能对自己的活动提交修改或删除申请" });
+      }
+    }
+
+    await query(
+      `INSERT INTO moderation_requests (id, type, requester_id, activity_id, payload, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+      [id, type, req.user.id, activityId, payload, now]
+    );
+
+    const rows = await query("SELECT * FROM moderation_requests WHERE id = ?", [id]);
+    res.status(201).json({ request: mapModerationRow(rows[0]) });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "提交审核失败" });
+  }
+});
+
+app.get("/api/admin/moderation/pending", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const rows = await query(
+      `
+      SELECT m.*, u.display_name as requester_name, u.email as requester_email
+      FROM moderation_requests m
+      JOIN users u ON m.requester_id = u.id
+      WHERE m.status = 'pending'
+      ORDER BY m.created_at ASC
+    `
+    );
+    res.json({ requests: rows.map(mapModerationRow) });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "获取待审核列表失败" });
+  }
+});
+
+app.post("/api/admin/moderation/:id/approve", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const result = await applyModerationRequest(req.params.id, req.user.id);
+    if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    const rows = await query("SELECT * FROM moderation_requests WHERE id = ?", [req.params.id]);
+    res.json({ request: mapModerationRow(rows[0]) });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "审核通过失败" });
+  }
+});
+
+app.post("/api/admin/moderation/:id/reject", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const rows = await query("SELECT * FROM moderation_requests WHERE id = ?", [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: "申请不存在" });
+    if (rows[0].status !== "pending") return res.status(400).json({ error: "该申请已处理" });
+
+    const reason = String(req.body?.reason || "").trim().slice(0, 500);
+    await query(
+      `UPDATE moderation_requests SET status = 'rejected', reviewer_id = ?, reviewed_at = ?, reject_reason = ? WHERE id = ?`,
+      [req.user.id, mysqlDateTime3(), reason || null, req.params.id]
+    );
+    const updated = await query("SELECT * FROM moderation_requests WHERE id = ?", [req.params.id]);
+    res.json({ request: mapModerationRow(updated[0]) });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "拒绝失败" });
+  }
+});
+
+// 待审核评论
+app.get("/api/admin/comments/pending", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const rows = await query(
+      `
+      SELECT c.*, u.display_name, u.role, a.title as activity_title
+      FROM comments c
+      JOIN users u ON c.user_id = u.id
+      JOIN activities a ON c.activity_id = a.id
+      WHERE c.status = 'pending'
+      ORDER BY c.created_at ASC
+    `
+    );
+    const comments = rows.map((row) => ({
+      ...mapCommentRow(row),
+      activityId: row.activity_id,
+      activityTitle: row.activity_title,
+    }));
+    res.json({ comments });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "获取待审核评论失败" });
+  }
+});
+
+app.post("/api/admin/comments/:id/approve", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const rows = await query("SELECT id FROM comments WHERE id = ?", [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: "评论不存在" });
+    await query("UPDATE comments SET status = 'approved' WHERE id = ?", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "通过评论失败" });
+  }
+});
+
+app.delete("/api/admin/comments/:id", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    await query("DELETE FROM comments WHERE id = ?", [req.params.id]);
+    res.status(204).send();
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "删除评论失败" });
   }
 });
 

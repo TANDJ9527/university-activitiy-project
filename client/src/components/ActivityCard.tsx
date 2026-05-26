@@ -3,6 +3,7 @@ import type { Activity } from '../types'
 import { formatRange } from '../lib/dates'
 import { publisherChannelLabel, roleLabel } from '../types'
 import { badgeClass, barClass } from '../lib/categoryStyles'
+import { ActivityRegisterButton } from './ActivityRegisterButton'
 import { FavoriteStarButton } from './FavoriteStarButton'
 
 type Props = {
@@ -64,7 +65,7 @@ export function ActivityCard({ a, onFavoriteChange }: Props) {
             {a.organizer ? `主办 · ${a.organizer}` : '\u00a0'}
           </p>
         </div>
-        <div className="mt-3 min-h-[1.5rem]">
+        <div className="mt-3 flex min-h-[1.5rem] flex-wrap items-center justify-between gap-2">
           <Link
             to={`/activity/${a.id}`}
             className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-600 no-underline transition group-hover:gap-2 group-hover:text-indigo-700"
@@ -72,6 +73,11 @@ export function ActivityCard({ a, onFavoriteChange }: Props) {
             查看详情
             <span aria-hidden>→</span>
           </Link>
+          <ActivityRegisterButton
+            activityId={a.id}
+            registered={a.registered}
+            className="!px-3 !py-1.5 !text-xs"
+          />
         </div>
       </div>
     </article>

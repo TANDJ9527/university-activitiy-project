@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { approveModeration, listPendingModeration, rejectModeration } from '../api'
-import { useAuth } from '../context/AuthContext'
 import { formatRange } from '../lib/dates'
 import type { ModerationRequest } from '../types'
+import { AdminComments } from './AdminComments'
+
+type Tab = 'activities' | 'comments'
 
 export function AdminModeration() {
-  const { user, ready } = useAuth()
+  const [tab, setTab] = useState<Tab>('activities')
   const [items, setItems] = useState<ModerationRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -27,21 +29,8 @@ export function AdminModeration() {
   }, [])
 
   useEffect(() => {
-    if (ready && user?.isPlatformAdmin) load()
-  }, [ready, user, load])
-
-  if (!ready) return <p className="text-slate-500">加载中…</p>
-  if (!user) return <Navigate to="/login" replace state={{ from: '/admin/moderation' }} />
-  if (!user.isPlatformAdmin) {
-    return (
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-950">
-        仅平台管理员可访问待审核。
-        <Link to="/" className="ml-2 font-semibold text-indigo-700 underline">
-          首页
-        </Link>
-      </div>
-    )
-  }
+    if (tab === 'activities') load()
+  }, [tab, load])
 
   async function approve(id: string) {
     setBusy(id)
@@ -91,13 +80,45 @@ export function AdminModeration() {
           ← 返回账户资料
         </Link>
       </p>
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-bold tracking-tight text-slate-900">待审核</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            学生发布、修改、删除活动的申请。通过后同步至活动广场与详情；拒绝后申请人需重新提交。
-          </p>
+          <h1 className="font-display text-3xl font-bold tracking-tight text-slate-900">管理后台</h1>
+          <p className="mt-2 text-sm text-slate-600">审核学生活动申请与用户评论。</p>
         </div>
+      </div>
+
+      <div className="mb-8 flex gap-2 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setTab('activities')}
+          className={`border-b-2 px-4 py-2 text-sm font-semibold transition ${
+            tab === 'activities'
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          活动申请
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('comments')}
+          className={`border-b-2 px-4 py-2 text-sm font-semibold transition ${
+            tab === 'comments'
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          评论审核
+        </button>
+      </div>
+
+      {tab === 'comments' ? (
+        <AdminComments />
+      ) : null}
+
+      {tab === 'activities' ? (
+        <>
+      <div className="mb-4 flex justify-end">
         <button
           type="button"
           onClick={() => load()}
@@ -175,6 +196,8 @@ export function AdminModeration() {
           })}
         </ul>
       )}
+        </>
+      ) : null}
     </div>
   )
 }
