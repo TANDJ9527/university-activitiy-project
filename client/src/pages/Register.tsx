@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { sendEmailCode } from '../api'
 import { useAuth } from '../context/AuthContext'
+import { antiAutofillInputProps } from '../lib/antiAutofill'
 import { isQqEmail } from '../lib/qqEmail'
 import { useToast } from '../context/ToastContext'
 
@@ -102,6 +103,7 @@ export function Register() {
 
       <form
         onSubmit={handleSubmit}
+        autoComplete="off"
         className="space-y-4 rounded-3xl border border-white/70 bg-white/70 p-7 shadow-xl shadow-slate-900/8 ring-1 ring-slate-200/60 backdrop-blur-md"
       >
         {err ? (
@@ -125,8 +127,10 @@ export function Register() {
           <input
             required
             maxLength={100}
+            name="register-display-name"
             value={displayName}
             onChange={(ev) => setDisplayName(ev.target.value)}
+            {...antiAutofillInputProps}
             className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
           />
         </label>
@@ -135,12 +139,12 @@ export function Register() {
           <span className="mb-1.5 block text-sm font-semibold text-slate-700">QQ 邮箱</span>
           <input
             type="email"
-            name="email"
-            autoComplete="email"
+            name="register-email"
             required
             placeholder="123456789@qq.com"
             value={email}
             onChange={(ev) => setEmail(ev.target.value)}
+            {...antiAutofillInputProps}
             className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
           />
         </label>
@@ -151,10 +155,10 @@ export function Register() {
             <input
               required
               maxLength={6}
-              name="verificationCode"
-              autoComplete="off"
+              name="register-verification-code"
               value={code}
               onChange={(ev) => setCode(ev.target.value.replace(/\D/g, ''))}
+              {...antiAutofillInputProps}
               className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
             />
           </label>
@@ -172,11 +176,12 @@ export function Register() {
           <span className="mb-1.5 block text-sm font-semibold text-slate-700">密码（至少 6 位）</span>
           <input
             type="password"
-            autoComplete="new-password"
+            name="register-password"
             required
             minLength={6}
             value={password}
             onChange={(ev) => setPassword(ev.target.value)}
+            {...antiAutofillInputProps}
             className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
           />
         </label>

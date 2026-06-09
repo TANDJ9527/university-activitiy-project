@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { resetPassword, sendEmailCode } from '../api'
+import { antiAutofillInputProps } from '../lib/antiAutofill'
 import { isQqEmail } from '../lib/qqEmail'
 import { useToast } from '../context/ToastContext'
 
@@ -73,6 +74,7 @@ export function ForgotPassword() {
 
       <form
         onSubmit={handleSubmit}
+        autoComplete="off"
         className="space-y-4 rounded-3xl border border-white/70 bg-white/70 p-7 shadow-xl ring-1 ring-slate-200/60 backdrop-blur-md"
       >
         {err ? (
@@ -83,12 +85,12 @@ export function ForgotPassword() {
           <span className="mb-1.5 block text-sm font-semibold text-slate-700">QQ 邮箱</span>
           <input
             type="email"
-            name="email"
+            name="reset-email"
             required
-            autoComplete="email"
             placeholder="123456789@qq.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            {...antiAutofillInputProps}
             className="w-full rounded-xl bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
           />
         </label>
@@ -99,10 +101,10 @@ export function ForgotPassword() {
             <input
               required
               maxLength={6}
-              name="verificationCode"
-              autoComplete="off"
+              name="reset-verification-code"
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+              {...antiAutofillInputProps}
               className="w-full rounded-xl bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
             />
           </label>
@@ -120,10 +122,12 @@ export function ForgotPassword() {
           <span className="mb-1.5 block text-sm font-semibold text-slate-700">新密码（至少 6 位）</span>
           <input
             type="password"
+            name="reset-password"
             required
             minLength={6}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            {...antiAutofillInputProps}
             className="w-full rounded-xl bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
           />
         </label>

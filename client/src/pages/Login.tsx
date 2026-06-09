@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { antiAutofillInputProps } from '../lib/antiAutofill'
 
 export function Login() {
   const { login, user, ready } = useAuth()
@@ -50,6 +51,7 @@ export function Login() {
 
       <form
         onSubmit={handleSubmit}
+        autoComplete="off"
         className="space-y-4 rounded-3xl border border-white/70 bg-white/70 p-7 shadow-xl shadow-slate-900/8 ring-1 ring-slate-200/60 backdrop-blur-md"
       >
         {err ? (
@@ -59,10 +61,11 @@ export function Login() {
           <span className="mb-1.5 block text-sm font-semibold text-slate-700">邮箱</span>
           <input
             type="email"
-            autoComplete="email"
+            name="login-email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            {...antiAutofillInputProps}
             className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 text-slate-900 shadow-inner ring-1 ring-slate-200/90 outline-none transition focus:ring-2 focus:ring-indigo-400/40"
           />
         </label>
@@ -78,10 +81,11 @@ export function Login() {
           </span>
           <input
             type="password"
-            autoComplete="current-password"
+            name="login-password"
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            {...antiAutofillInputProps}
             className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 text-slate-900 shadow-inner ring-1 ring-slate-200/90 outline-none transition focus:ring-2 focus:ring-indigo-400/40"
           />
         </label>
