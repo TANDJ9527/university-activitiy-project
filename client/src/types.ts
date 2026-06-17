@@ -57,6 +57,8 @@ export interface AuthUser {
   id: string
   email: string
   displayName: string
+  studentId: string | null
+  realName: string | null
   role: UserRole
   isPlatformAdmin: boolean
 }

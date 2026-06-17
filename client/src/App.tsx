@@ -9,6 +9,8 @@ import { Register } from './pages/Register'
 import { Account } from './pages/Account'
 import { Favorites } from './pages/Favorites'
 import { AdminModeration } from './pages/AdminModeration'
+import { AdminUsers } from './pages/AdminUsers'
+import { AdminSchoolApprovals } from './pages/AdminSchoolApprovals'
 import { ForgotPassword } from './pages/ForgotPassword'
 import { MyRegistrations } from './pages/MyRegistrations'
 import { ApplyRouter, PublishRouter } from './pages/PublishRouter'
@@ -32,6 +34,22 @@ export default function App() {
             element={
               <RequirePlatformAdmin>
                 <AdminModeration />
+              </RequirePlatformAdmin>
+            }
+          />
+          <Route
+            path="admin/users"
+            element={
+              <RequirePlatformAdmin>
+                <AdminUsers />
+              </RequirePlatformAdmin>
+            }
+          />
+          <Route
+            path="admin/school-approvals"
+            element={
+              <RequirePlatformAdmin>
+                <AdminSchoolApprovals />
               </RequirePlatformAdmin>
             }
           />

@@ -16,14 +16,17 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "1mb" }));
 
-async function userPublicFields(userId, email, displayName, role) {
+async function userPublicFields(userId, email, displayName, studentId, realName, role, schoolApproved = true) {
   const admins = await query("SELECT user_id FROM platform_admins WHERE user_id = ?", [userId]);
   return {
     id: userId,
     email,
     displayName,
+    studentId,
+    realName,
     role,
     isPlatformAdmin: admins.length > 0,
+    schoolApproved,
   };
 }
 
@@ -171,6 +174,8 @@ app.post("/api/auth/register", async (req, res) => {
   const code = String(body.code || "").trim();
   const roleRaw = String(body.role || "student").toLowerCase();
   const role = roleRaw === "school" ? "school" : "student";
+  const studentId = String(body.studentId || "").trim();
+  const realName = String(body.realName || "").trim();
 
   if (!isQqEmail(email)) {
     return res.status(400).json({ error: "请使用 QQ 邮箱注册（例如 123456789@qq.com）" });
@@ -178,6 +183,15 @@ app.post("/api/auth/register", async (req, res) => {
   if (password.length < 6) return res.status(400).json({ error: "密码至少 6 位" });
   if (!displayName || displayName.length > 100) {
     return res.status(400).json({ error: "请填写昵称（不超过 100 字）" });
+  }
+
+  if (role === 'student') {
+    if (!studentId || studentId.length > 50) {
+      return res.status(400).json({ error: "请填写学号（不超过 50 字）" });
+    }
+    if (!realName || realName.length > 100) {
+      return res.status(400).json({ error: "请填写真实姓名（不超过 100 字）" });
+    }
   }
 
   try {
@@ -191,13 +205,18 @@ app.post("/api/auth/register", async (req, res) => {
     const id = randomUUID();
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     const now = mysqlDateTime3();
+    const schoolApproved = role === 'school' ? 0 : 1;
 
     await query(
-      "INSERT INTO users (id, email, password_hash, display_name, role, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [id, email, passwordHash, displayName, role, now]
+      "INSERT INTO users (id, email, password_hash, display_name, student_id, real_name, role, school_approved, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, email, passwordHash, displayName, studentId || null, realName || null, role, schoolApproved, now]
     );
 
-    const user = await userPublicFields(id, email, displayName, role);
+    if (role === 'school') {
+      return res.status(201).json({ ok: true, message: "校方注册申请已提交，等待管理员审核通过后方可登录" });
+    }
+
+    const user = await userPublicFields(id, email, displayName, studentId || null, realName || null, role, true);
     const token = signUserToken(user);
     res.status(201).json({ token, user });
   } catch (e) {
@@ -246,7 +265,7 @@ app.post("/api/auth/login", async (req, res) => {
   }
 
   try {
-    const users = await query("SELECT id, email, password_hash, display_name, role FROM users WHERE email = ?", [email]);
+    const users = await query("SELECT id, email, password_hash, display_name, student_id, real_name, role, school_approved FROM users WHERE email = ?", [email]);
     if (users.length === 0) {
       return res.status(401).json({ error: "邮箱或密码错误" });
     }
@@ -257,7 +276,11 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ error: "邮箱或密码错误" });
     }
 
-    const publicUser = await userPublicFields(user.id, user.email, user.display_name, user.role);
+    if (user.role === 'school' && !user.school_approved) {
+      return res.status(403).json({ error: "您的校方账号正在审核中，请耐心等待管理员审核通过" });
+    }
+
+    const publicUser = await userPublicFields(user.id, user.email, user.display_name, user.student_id, user.real_name, user.role, Boolean(user.school_approved));
     const token = signUserToken(publicUser);
     res.json({ token, user: publicUser });
   } catch (e) {
@@ -269,13 +292,13 @@ app.post("/api/auth/login", async (req, res) => {
 // 获取当前用户信息
 app.get("/api/auth/me", authMiddleware(true), async (req, res) => {
   try {
-    const users = await query("SELECT id, email, display_name, role FROM users WHERE id = ?", [req.user.id]);
+    const users = await query("SELECT id, email, display_name, student_id, real_name, role, school_approved FROM users WHERE id = ?", [req.user.id]);
     if (users.length === 0) {
       return res.status(404).json({ error: "用户不存在" });
     }
 
     const user = users[0];
-    const publicUser = await userPublicFields(user.id, user.email, user.display_name, user.role);
+    const publicUser = await userPublicFields(user.id, user.email, user.display_name, user.student_id, user.real_name, user.role, Boolean(user.school_approved));
     res.json({ user: publicUser });
   } catch (e) {
     console.error(e);
@@ -290,12 +313,15 @@ app.put("/api/auth/me", authMiddleware(true), async (req, res) => {
   }
   try {
     await query("UPDATE users SET display_name = ? WHERE id = ?", [displayName, req.user.id]);
-    const users = await query("SELECT email, role FROM users WHERE id = ?", [req.user.id]);
+    const users = await query("SELECT email, student_id, real_name, role, school_approved FROM users WHERE id = ?", [req.user.id]);
     const publicUser = await userPublicFields(
       req.user.id,
       users[0].email,
       displayName,
-      users[0].role
+      users[0].student_id,
+      users[0].real_name,
+      users[0].role,
+      Boolean(users[0].school_approved)
     );
     res.json({ user: publicUser });
   } catch (e) {
@@ -439,11 +465,23 @@ app.post("/api/activities", authMiddleware(true), async (req, res) => {
   const startAt = body.startAt;
   const endAt = body.endAt || null;
 
-  if (!title || title.length > 120) {
-    return res.status(400).json({ error: "标题必填且不超过 120 字" });
+  if (!title || title.length > 50) {
+    return res.status(400).json({ error: "标题必填且不超过 50 字" });
   }
-  if (!description || description.length > 8000) {
-    return res.status(400).json({ error: "活动说明必填且不超过 8000 字" });
+  if (!description || description.length > 1000) {
+    return res.status(400).json({ error: "活动说明必填且不超过 1000 字" });
+  }
+  if (!location || location.length > 50) {
+    return res.status(400).json({ error: "地点必填且不超过 50 字" });
+  }
+  if (!organizer || organizer.length > 50) {
+    return res.status(400).json({ error: "主办方必填且不超过 50 字" });
+  }
+  if (!contact || contact.length > 50) {
+    return res.status(400).json({ error: "联系方式必填且不超过 50 字" });
+  }
+  if (!category) {
+    return res.status(400).json({ error: "请选择类别" });
   }
   if (!startAt) return res.status(400).json({ error: "请填写开始时间" });
   
@@ -453,23 +491,27 @@ app.post("/api/activities", authMiddleware(true), async (req, res) => {
   }
   
   let end = null;
-  if (endAt) {
-    end = new Date(endAt);
-    if (Number.isNaN(end.getTime())) {
-      return res.status(400).json({ error: "结束时间格式无效" });
+    if (endAt) {
+      end = new Date(endAt);
+      if (Number.isNaN(end.getTime())) {
+        return res.status(400).json({ error: "结束时间格式无效" });
+      }
     }
-  }
+
+    if (end && end <= start) {
+      return res.status(400).json({ error: "结束时间必须晚于开始时间" });
+    }
 
   try {
     const id = randomUUID();
     const uid = req.user.id;
     const publisherRole = req.user.role === "school" ? "school" : "student";
-    const now = new Date().toISOString();
+    const now = mysqlDateTime3();
 
     await query(`
       INSERT INTO activities (id, user_id, publisher_role, title, description, location, organizer, contact, category, start_at, end_at, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [id, uid, publisherRole, title, description, location, organizer, contact, category, start.toISOString(), end ? end.toISOString() : null, now, now]);
+    `, [id, uid, publisherRole, title, description, location, organizer, contact, category, mysqlDateTime3(start), end ? mysqlDateTime3(end) : null, now, now]);
 
     // 获取创建的活动信息
     const activities = await query(`
@@ -531,8 +573,24 @@ app.put("/api/activities/:id", authMiddleware(true), async (req, res) => {
     const organizer = body.organizer !== undefined ? String(body.organizer).trim() : existing.organizer;
     const contact = body.contact !== undefined ? String(body.contact).trim() : existing.contact;
     const category = body.category !== undefined ? String(body.category).trim() : existing.category;
-    const startAt = body.startAt !== undefined ? body.startAt : existing.start_at;
-    const endAt = body.endAt !== undefined ? body.endAt : existing.end_at;
+    const startAtRaw = body.startAt !== undefined ? body.startAt : existing.start_at;
+    const endAtRaw = body.endAt !== undefined ? body.endAt : existing.end_at;
+    const start = new Date(startAtRaw);
+    if (Number.isNaN(start.getTime())) {
+      return res.status(400).json({ error: "开始时间格式无效" });
+    }
+    let end = null;
+    if (endAtRaw) {
+      end = new Date(endAtRaw);
+      if (Number.isNaN(end.getTime())) {
+        return res.status(400).json({ error: "结束时间格式无效" });
+      }
+    }
+    if (end && end <= start) {
+      return res.status(400).json({ error: "结束时间必须晚于开始时间" });
+    }
+    const startAt = mysqlDateTime3(start);
+    const endAt = end ? mysqlDateTime3(end) : null;
 
     if (!title || title.length > 120) {
       return res.status(400).json({ error: "标题必填且不超过 120 字" });
@@ -545,7 +603,7 @@ app.put("/api/activities/:id", authMiddleware(true), async (req, res) => {
       UPDATE activities 
       SET title = ?, description = ?, location = ?, organizer = ?, contact = ?, category = ?, start_at = ?, end_at = ?, updated_at = ?
       WHERE id = ?
-    `, [title, description, location, organizer, contact, category, startAt, endAt, new Date().toISOString(), req.params.id]);
+    `, [title, description, location, organizer, contact, category, startAt, endAt, mysqlDateTime3(), req.params.id]);
 
     // 获取更新后的活动信息
     const updatedActivities = await query(`
@@ -970,6 +1028,119 @@ app.delete("/api/admin/comments/:id", authMiddleware(true), adminOnly, async (re
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "删除评论失败" });
+  }
+});
+
+app.get("/api/admin/users", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const rows = await query(`
+      SELECT u.id, u.email, u.display_name, u.role, u.created_at, 
+             CASE WHEN pa.user_id IS NOT NULL THEN 1 ELSE 0 END as is_platform_admin
+      FROM users u
+      LEFT JOIN platform_admins pa ON u.id = pa.user_id
+      ORDER BY u.created_at DESC
+    `);
+    const users = rows.map((row) => ({
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      role: row.role,
+      createdAt: row.created_at,
+      isPlatformAdmin: Boolean(row.is_platform_admin),
+    }));
+    res.json({ users });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "获取用户列表失败" });
+  }
+});
+
+app.delete("/api/admin/users/:id", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const targetId = req.params.id;
+
+    if (targetId === req.user.id) {
+      return res.status(403).json({ error: "不能删除自己" });
+    }
+
+    const admins = await query("SELECT user_id FROM platform_admins WHERE user_id = ?", [targetId]);
+    if (admins.length > 0) {
+      return res.status(403).json({ error: "不能删除平台管理员" });
+    }
+
+    const users = await query("SELECT id FROM users WHERE id = ?", [targetId]);
+    if (users.length === 0) {
+      return res.status(404).json({ error: "用户不存在" });
+    }
+
+    await query("DELETE FROM users WHERE id = ?", [targetId]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "删除用户失败" });
+  }
+});
+
+app.get("/api/admin/school-registrations", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const rows = await query(`
+      SELECT id, email, display_name, role, school_approved, created_at
+      FROM users
+      WHERE role = 'school'
+      ORDER BY created_at DESC
+    `);
+    const requests = rows.map((row) => ({
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      role: row.role,
+      schoolApproved: Boolean(row.school_approved),
+      createdAt: row.created_at,
+    }));
+    res.json({ requests });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "获取校方注册列表失败" });
+  }
+});
+
+app.put("/api/admin/school-registrations/:id/approve", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const users = await query("SELECT id, role, school_approved FROM users WHERE id = ?", [req.params.id]);
+    if (users.length === 0) {
+      return res.status(404).json({ error: "用户不存在" });
+    }
+    if (users[0].role !== 'school') {
+      return res.status(400).json({ error: "该用户不是校方账号" });
+    }
+    if (users[0].school_approved) {
+      return res.status(400).json({ error: "该账号已通过审核" });
+    }
+    await query("UPDATE users SET school_approved = 1 WHERE id = ?", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "审核失败" });
+  }
+});
+
+app.put("/api/admin/school-registrations/:id/reject", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const users = await query("SELECT id, role, school_approved FROM users WHERE id = ?", [req.params.id]);
+    if (users.length === 0) {
+      return res.status(404).json({ error: "用户不存在" });
+    }
+    if (users[0].role !== 'school') {
+      return res.status(400).json({ error: "该用户不是校方账号" });
+    }
+    if (users[0].school_approved) {
+      return res.status(400).json({ error: "该账号已通过审核，无法拒绝" });
+    }
+    await query("DELETE FROM users WHERE id = ?", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "拒绝失败" });
   }
 });
 

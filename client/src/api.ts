@@ -48,14 +48,16 @@ export async function register(body: {
   displayName: string
   role: 'student' | 'school'
   code: string
-}): Promise<{ token: string; user: AuthUser }> {
+  studentId?: string
+  realName?: string
+}): Promise<{ token: string; user: AuthUser } | { ok: true; message: string }> {
   const res = await fetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, email: body.email.trim().toLowerCase() }),
   })
   if (!res.ok) throw new Error(await parseError(res))
-  return res.json() as Promise<{ token: string; user: AuthUser }>
+  return res.json() as Promise<{ token: string; user: AuthUser } | { ok: true; message: string }>
 }
 
 export async function login(body: { email: string; password: string }): Promise<{ token: string; user: AuthUser }> {
@@ -324,6 +326,62 @@ export async function approveComment(commentId: string): Promise<void> {
 export async function adminDeleteComment(commentId: string): Promise<void> {
   const res = await fetch(`/api/admin/comments/${encodeURIComponent(commentId)}`, {
     method: 'DELETE',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+}
+
+export interface AdminUser {
+  id: string
+  email: string
+  displayName: string
+  role: 'student' | 'school'
+  createdAt: string
+  isPlatformAdmin: boolean
+}
+
+export async function listAdminUsers(): Promise<AdminUser[]> {
+  const res = await fetch('/api/admin/users', { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = (await res.json()) as { users?: AdminUser[] }
+  return data.users ?? []
+}
+
+export async function deleteAdminUser(userId: string): Promise<void> {
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+}
+
+export interface SchoolRegistration {
+  id: string
+  email: string
+  displayName: string
+  role: 'school'
+  schoolApproved: boolean
+  createdAt: string
+}
+
+export async function listSchoolRegistrations(): Promise<SchoolRegistration[]> {
+  const res = await fetch('/api/admin/school-registrations', { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = (await res.json()) as { requests?: SchoolRegistration[] }
+  return data.requests ?? []
+}
+
+export async function approveSchoolRegistration(userId: string): Promise<void> {
+  const res = await fetch(`/api/admin/school-registrations/${encodeURIComponent(userId)}/approve`, {
+    method: 'PUT',
+    headers: { ...authHeaders() },
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+}
+
+export async function rejectSchoolRegistration(userId: string): Promise<void> {
+  const res = await fetch(`/api/admin/school-registrations/${encodeURIComponent(userId)}/reject`, {
+    method: 'PUT',
     headers: { ...authHeaders() },
   })
   if (!res.ok) throw new Error(await parseError(res))

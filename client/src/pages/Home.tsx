@@ -14,6 +14,7 @@ export function Home() {
   const [err, setErr] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    if (!user) return
     setLoading(true)
     setErr(null)
     try {
@@ -89,14 +90,31 @@ export function Home() {
         </button>
       </div>
 
-      {err ? (
+      {!ready ? (
+        <ul className="grid items-stretch gap-5 sm:grid-cols-1 lg:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <li key={i} className="flex">
+              <CardSkeleton />
+            </li>
+          ))}
+        </ul>
+      ) : !user ? (
+        <div className="rounded-3xl border border-dashed border-slate-300/80 bg-white/50 py-20 text-center backdrop-blur-sm">
+          <p className="font-display text-lg font-semibold text-slate-800">请先登录查看活动</p>
+          <p className="mt-2 text-sm text-slate-600">登录后可浏览全部活动、参与报名及发布活动。</p>
+          <Link
+            to="/login"
+            className="mt-6 inline-flex rounded-full bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white no-underline shadow-lg shadow-indigo-500/20"
+          >
+            前往登录
+          </Link>
+        </div>
+      ) : err ? (
         <div className="mb-8 rounded-2xl border border-red-200/80 bg-red-50/90 px-5 py-4 text-sm text-red-800 shadow-sm">
           {err}（请确认根目录已 <code className="rounded bg-red-100/80 px-1">npm run dev</code>，且 MySQL 库{' '}
           <code className="rounded bg-red-100/80 px-1">program</code> 可连接）
         </div>
-      ) : null}
-
-      {loading ? (
+      ) : loading ? (
         <ul className="grid items-stretch gap-5 sm:grid-cols-1 lg:grid-cols-2">
           {Array.from({ length: 4 }).map((_, i) => (
             <li key={i} className="flex">
@@ -108,16 +126,12 @@ export function Home() {
         <div className="rounded-3xl border border-dashed border-slate-300/80 bg-white/50 py-20 text-center backdrop-blur-sm">
           <p className="font-display text-lg font-semibold text-slate-800">广场还没有活动</p>
           <p className="mt-2 text-sm text-slate-600">成为第一个发布者，或稍后再来看看。</p>
-          {ready && user ? (
-            <Link
-              to={needsActivityModeration(user) ? '/apply' : '/publish'}
-              className="mt-6 inline-flex rounded-full bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white no-underline shadow-lg shadow-indigo-500/20"
-            >
-              {needsActivityModeration(user) ? '提交活动审核' : '发布活动'}
-            </Link>
-          ) : (
-            <p className="mt-4 text-sm text-slate-600">可在页面顶部注册或登录后发布活动。</p>
-          )}
+          <Link
+            to={needsActivityModeration(user) ? '/apply' : '/publish'}
+            className="mt-6 inline-flex rounded-full bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white no-underline shadow-lg shadow-indigo-500/20"
+          >
+            {needsActivityModeration(user) ? '提交活动审核' : '发布活动'}
+          </Link>
         </div>
       ) : (
         <>

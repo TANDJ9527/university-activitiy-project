@@ -176,6 +176,17 @@ async function initDatabase() {
       if (!/Duplicate column/i.test(msg)) throw e;
     }
 
+    try {
+      await query(`
+        ALTER TABLE users
+        ADD COLUMN school_approved TINYINT(1) NOT NULL DEFAULT 1
+        AFTER role
+      `);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/Duplicate column/i.test(msg)) throw e;
+    }
+
     console.log('✅ 数据库表结构初始化完成');
   } catch (error) {
     console.error('❌ 数据库初始化失败:', error);

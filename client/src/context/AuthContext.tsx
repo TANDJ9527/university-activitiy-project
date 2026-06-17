@@ -76,9 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: 'student' | 'school'
       code: string
     }) => {
-      const { token, user: u } = await api.register(p)
+      const result = await api.register(p)
+      if ('ok' in result && result.ok) {
+        return result
+      }
+      const { token, user: u } = result as { token: string; user: AuthUser }
       setToken(token)
       setUser(u)
+      return result
     },
     []
   )

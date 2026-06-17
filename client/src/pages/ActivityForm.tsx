@@ -60,13 +60,57 @@ export function ActivityForm({
       setError('请填写标题')
       return
     }
+    if (v.title.length > 50) {
+      setError('标题不能超过 50 字')
+      return
+    }
     if (!v.description.trim()) {
       setError('请填写活动说明')
+      return
+    }
+    if (v.description.length > 1000) {
+      setError('活动说明不能超过 1000 字')
+      return
+    }
+    if (!v.location.trim()) {
+      setError('请填写地点')
+      return
+    }
+    if (v.location.length > 50) {
+      setError('地点不能超过 50 字')
+      return
+    }
+    if (!v.organizer.trim()) {
+      setError('请填写主办方')
+      return
+    }
+    if (v.organizer.length > 50) {
+      setError('主办方不能超过 50 字')
+      return
+    }
+    if (!v.contact.trim()) {
+      setError('请填写联系方式')
+      return
+    }
+    if (v.contact.length > 50) {
+      setError('联系方式不能超过 50 字')
+      return
+    }
+    if (!v.category) {
+      setError('请选择类别')
       return
     }
     if (!v.startAt) {
       setError('请选择开始时间')
       return
+    }
+    if (v.endAt) {
+      const start = new Date(v.startAt)
+      const end = new Date(v.endAt)
+      if (end <= start) {
+        setError('结束时间必须晚于开始时间')
+        return
+      }
     }
     setSaving(true)
     try {
@@ -94,17 +138,19 @@ export function ActivityForm({
         <span className="mb-1.5 block text-sm font-semibold text-slate-700">标题 *</span>
         <input
           required
-          maxLength={120}
+          maxLength={50}
           value={v.title}
           disabled={disabled || saving}
           onChange={(e) => setV((x) => ({ ...x, title: e.target.value }))}
           className={field}
+          placeholder="请输入标题（不超过50字）"
         />
       </label>
 
       <label className="block">
-        <span className="mb-1.5 block text-sm font-semibold text-slate-700">类别</span>
+        <span className="mb-1.5 block text-sm font-semibold text-slate-700">类别 *</span>
         <select
+          required
           value={v.category}
           disabled={disabled || saving}
           onChange={(e) => setV((x) => ({ ...x, category: e.target.value }))}
@@ -143,33 +189,40 @@ export function ActivityForm({
       </div>
 
       <label className="block">
-        <span className="mb-1.5 block text-sm font-semibold text-slate-700">地点</span>
+        <span className="mb-1.5 block text-sm font-semibold text-slate-700">地点 *</span>
         <input
+          required
+          maxLength={50}
           value={v.location}
           disabled={disabled || saving}
           onChange={(e) => setV((x) => ({ ...x, location: e.target.value }))}
-          placeholder="例如：图书馆报告厅"
+          placeholder="请输入地点（不超过50字）"
           className={field}
         />
       </label>
 
       <label className="block">
-        <span className="mb-1.5 block text-sm font-semibold text-slate-700">主办方</span>
+        <span className="mb-1.5 block text-sm font-semibold text-slate-700">主办方 *</span>
         <input
+          required
+          maxLength={50}
           value={v.organizer}
           disabled={disabled || saving}
           onChange={(e) => setV((x) => ({ ...x, organizer: e.target.value }))}
+          placeholder="请输入主办方（不超过50字）"
           className={field}
         />
       </label>
 
       <label className="block">
-        <span className="mb-1.5 block text-sm font-semibold text-slate-700">联系方式</span>
+        <span className="mb-1.5 block text-sm font-semibold text-slate-700">联系方式 *</span>
         <input
+          required
+          maxLength={50}
           value={v.contact}
           disabled={disabled || saving}
           onChange={(e) => setV((x) => ({ ...x, contact: e.target.value }))}
-          placeholder="邮箱、微信群、电话等"
+          placeholder="请输入联系方式（不超过50字）"
           className={field}
         />
       </label>
@@ -179,12 +232,14 @@ export function ActivityForm({
         <textarea
           required
           rows={8}
-          maxLength={8000}
+          maxLength={1000}
           value={v.description}
           disabled={disabled || saving}
           onChange={(e) => setV((x) => ({ ...x, description: e.target.value }))}
           className={`${field} resize-y min-h-[200px]`}
+          placeholder="请输入活动说明（不超过1000字）"
         />
+        <span className="mt-1 block text-xs text-slate-500">{v.description.length}/1000</span>
       </label>
 
       <button

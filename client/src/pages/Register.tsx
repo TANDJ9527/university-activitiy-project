@@ -17,6 +17,8 @@ export function Register() {
   const [displayName, setDisplayName] = useState('')
   const [code, setCode] = useState('')
   const [role, setRole] = useState<'student' | 'school'>('student')
+  const [studentId, setStudentId] = useState('')
+  const [realName, setRealName] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
@@ -66,15 +68,32 @@ export function Register() {
       setErr('请填写邮箱验证码')
       return
     }
+    if (role === 'student') {
+      if (!studentId.trim()) {
+        setErr('请填写学号')
+        return
+      }
+      if (!realName.trim()) {
+        setErr('请填写真实姓名')
+        return
+      }
+    }
     setLoading(true)
     try {
-      await register({
+      const result = await register({
         email: mail,
         password,
         displayName: displayName.trim(),
         role,
         code: code.trim(),
+        studentId: studentId.trim(),
+        realName: realName.trim(),
       })
+      if (result && 'ok' in result && result.ok) {
+        showToast(result.message || '校方注册申请已提交', 'success')
+        navigate('/login', { replace: true })
+        return
+      }
       showToast('注册成功', 'success')
       navigate('/', { replace: true })
     } catch (er) {
@@ -121,6 +140,38 @@ export function Register() {
             <option value="school">校方 / 组织方</option>
           </select>
         </label>
+
+        {role === 'student' && (
+          <>
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-semibold text-slate-700">学号</span>
+              <input
+                required
+                maxLength={50}
+                name="register-student-id"
+                placeholder="请输入学号"
+                value={studentId}
+                onChange={(ev) => setStudentId(ev.target.value)}
+                {...antiAutofillInputProps}
+                className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-semibold text-slate-700">真实姓名</span>
+              <input
+                required
+                maxLength={100}
+                name="register-real-name"
+                placeholder="请输入真实姓名"
+                value={realName}
+                onChange={(ev) => setRealName(ev.target.value)}
+                {...antiAutofillInputProps}
+                className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
+              />
+            </label>
+          </>
+        )}
 
         <label className="block">
           <span className="mb-1.5 block text-sm font-semibold text-slate-700">昵称 / 组织名称</span>

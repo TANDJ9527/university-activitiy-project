@@ -48,13 +48,29 @@ export function Account() {
           <span className="mt-1 text-xs text-emerald-900/80">查看或取消报名</span>
         </Link>
         {user.isPlatformAdmin ? (
-          <Link
-            to="/admin/moderation"
-            className="flex flex-col rounded-2xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50/90 to-white p-4 no-underline shadow-sm ring-1 ring-indigo-100/80 transition hover:border-indigo-300 hover:shadow-md sm:col-span-2"
-          >
-            <span className="text-sm font-bold text-indigo-950">管理后台 · 待审核</span>
-            <span className="mt-1 text-xs text-indigo-900/80">活动申请与评论审核</span>
-          </Link>
+          <>
+            <Link
+              to="/admin/moderation"
+              className="flex flex-col rounded-2xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50/90 to-white p-4 no-underline shadow-sm ring-1 ring-indigo-100/80 transition hover:border-indigo-300 hover:shadow-md"
+            >
+              <span className="text-sm font-bold text-indigo-950">管理后台 · 待审核</span>
+              <span className="mt-1 text-xs text-indigo-900/80">活动申请与评论审核</span>
+            </Link>
+            <Link
+              to="/admin/users"
+              className="flex flex-col rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50/90 to-white p-4 no-underline shadow-sm ring-1 ring-amber-100/80 transition hover:border-amber-300 hover:shadow-md"
+            >
+              <span className="text-sm font-bold text-amber-950">管理所有用户</span>
+              <span className="mt-1 text-xs text-amber-900/80">查看平台所有注册用户</span>
+            </Link>
+            <Link
+              to="/admin/school-approvals"
+              className="flex flex-col rounded-2xl border border-rose-200/80 bg-gradient-to-br from-rose-50/90 to-white p-4 no-underline shadow-sm ring-1 ring-rose-100/80 transition hover:border-rose-300 hover:shadow-md"
+            >
+              <span className="text-sm font-bold text-rose-950">校方注册审核</span>
+              <span className="mt-1 text-xs text-rose-900/80">审核校方/组织方注册申请</span>
+            </Link>
+          </>
         ) : (
           <div className="rounded-2xl border border-slate-200/80 bg-slate-50/50 p-4 text-xs text-slate-500">
             学生发布或修改、删除自己活动时需管理员审核；校方账号可直接生效。

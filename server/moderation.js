@@ -16,6 +16,43 @@ export async function applyModerationRequest(requestId, reviewerId) {
   const now = mysqlDateTime3();
   const payload = req.payload ? JSON.parse(req.payload) : null;
 
+  if (payload) {
+    if (!payload.title || payload.title.length > 50) {
+      return { error: "标题必填且不超过 50 字", status: 400 };
+    }
+    if (!payload.description || payload.description.length > 1000) {
+      return { error: "活动说明必填且不超过 1000 字", status: 400 };
+    }
+    if (!payload.location || payload.location.length > 50) {
+      return { error: "地点必填且不超过 50 字", status: 400 };
+    }
+    if (!payload.organizer || payload.organizer.length > 50) {
+      return { error: "主办方必填且不超过 50 字", status: 400 };
+    }
+    if (!payload.contact || payload.contact.length > 50) {
+      return { error: "联系方式必填且不超过 50 字", status: 400 };
+    }
+    if (!payload.category) {
+      return { error: "请选择类别", status: 400 };
+    }
+  }
+
+  if (payload && payload.startAt) {
+    const start = new Date(payload.startAt);
+    if (Number.isNaN(start.getTime())) {
+      return { error: "开始时间格式无效", status: 400 };
+    }
+    if (payload.endAt) {
+      const end = new Date(payload.endAt);
+      if (Number.isNaN(end.getTime())) {
+        return { error: "结束时间格式无效", status: 400 };
+      }
+      if (end <= start) {
+        return { error: "结束时间必须晚于开始时间", status: 400 };
+      }
+    }
+  }
+
   if (req.type === "create" && payload) {
     const id = randomUUID();
     await query(
@@ -30,8 +67,8 @@ export async function applyModerationRequest(requestId, reviewerId) {
         payload.organizer || "",
         payload.contact || "",
         payload.category || "其他",
-        payload.startAt,
-        payload.endAt || null,
+        mysqlDateTime3(payload.startAt),
+        payload.endAt ? mysqlDateTime3(payload.endAt) : null,
         now,
         now,
       ]
@@ -53,8 +90,8 @@ export async function applyModerationRequest(requestId, reviewerId) {
         payload.organizer || "",
         payload.contact || "",
         payload.category || "其他",
-        payload.startAt,
-        payload.endAt || null,
+        mysqlDateTime3(payload.startAt),
+        payload.endAt ? mysqlDateTime3(payload.endAt) : null,
         now,
         req.activity_id,
       ]
