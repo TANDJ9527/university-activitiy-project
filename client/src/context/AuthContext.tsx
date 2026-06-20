@@ -21,10 +21,12 @@ type AuthState = {
     displayName: string
     role: 'student' | 'school'
     code: string
-  }) => Promise<void>
+    studentId?: string
+    realName?: string
+  }) => Promise<{ token: string; user: AuthUser } | { ok: true; message: string } | void>
   logout: () => void
   refreshUser: () => Promise<void>
-  updateDisplayName: (displayName: string) => Promise<void>
+  updateProfile: (displayName: string, studentId?: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -75,6 +77,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       displayName: string
       role: 'student' | 'school'
       code: string
+      studentId?: string
+      realName?: string
     }) => {
       const result = await api.register(p)
       if ('ok' in result && result.ok) {
@@ -93,14 +97,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }, [])
 
-  const updateDisplayName = useCallback(async (displayName: string) => {
-    const u = await api.updateMe({ displayName })
+  const updateProfile = useCallback(async (displayName: string, studentId?: string) => {
+    const u = await api.updateMe({ displayName, studentId })
     setUser(u)
   }, [])
 
   const value = useMemo(
-    () => ({ user, ready, login, register, logout, refreshUser, updateDisplayName }),
-    [user, ready, login, register, logout, refreshUser, updateDisplayName]
+    () => ({ user, ready, login, register, logout, refreshUser, updateProfile }),
+    [user, ready, login, register, logout, refreshUser, updateProfile]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

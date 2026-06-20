@@ -3,10 +3,19 @@ import cors from "cors";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "crypto";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { query, testConnection, initDatabase } from "./mysql.js";
 import { isQqEmail, validateCommentContent } from "./validators.js";
 import { issueEmailCode, consumeEmailCode } from "./emailCodes.js";
 import { applyModerationRequest, mapModerationRow } from "./moderation.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const uploadsDir = path.join(__dirname, "uploads", "avatars");
+if (!existsSync(uploadsDir)) {
+  mkdirSync(uploadsDir, { recursive: true });
+}
 
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
@@ -16,7 +25,10 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "1mb" }));
 
-async function userPublicFields(userId, email, displayName, studentId, realName, role, schoolApproved = true) {
+// 静态文件服务 - 头像图片
+app.use("/uploads/avatars", express.static(uploadsDir));
+
+async function userPublicFields(userId, email, displayName, studentId, realName, role, schoolApproved = true, avatarUrl = null) {
   const admins = await query("SELECT user_id FROM platform_admins WHERE user_id = ?", [userId]);
   return {
     id: userId,
@@ -27,6 +39,7 @@ async function userPublicFields(userId, email, displayName, studentId, realName,
     role,
     isPlatformAdmin: admins.length > 0,
     schoolApproved,
+    avatarUrl: avatarUrl || null,
   };
 }
 
@@ -181,16 +194,17 @@ app.post("/api/auth/register", async (req, res) => {
     return res.status(400).json({ error: "请使用 QQ 邮箱注册（例如 123456789@qq.com）" });
   }
   if (password.length < 6) return res.status(400).json({ error: "密码至少 6 位" });
-  if (!displayName || displayName.length > 100) {
-    return res.status(400).json({ error: "请填写昵称（不超过 100 字）" });
+  if (password.length > 20) return res.status(400).json({ error: "密码不能超过 20 位" });
+  if (!displayName || displayName.length > 10) {
+    return res.status(400).json({ error: "请填写昵称/组织名称（不超过 10 字）" });
   }
 
   if (role === 'student') {
-    if (!studentId || studentId.length > 50) {
-      return res.status(400).json({ error: "请填写学号（不超过 50 字）" });
+    if (!studentId || !/^\d{13}$/.test(studentId)) {
+      return res.status(400).json({ error: "学号必须是 13 位数字" });
     }
-    if (!realName || realName.length > 100) {
-      return res.status(400).json({ error: "请填写真实姓名（不超过 100 字）" });
+    if (!realName || realName.length > 10) {
+      return res.status(400).json({ error: "请填写真实姓名（不超过 10 字）" });
     }
   }
 
@@ -205,20 +219,17 @@ app.post("/api/auth/register", async (req, res) => {
     const id = randomUUID();
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     const now = mysqlDateTime3();
-    const schoolApproved = role === 'school' ? 0 : 1;
+    const schoolApproved = 0;
 
     await query(
       "INSERT INTO users (id, email, password_hash, display_name, student_id, real_name, role, school_approved, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [id, email, passwordHash, displayName, studentId || null, realName || null, role, schoolApproved, now]
     );
 
-    if (role === 'school') {
-      return res.status(201).json({ ok: true, message: "校方注册申请已提交，等待管理员审核通过后方可登录" });
-    }
-
-    const user = await userPublicFields(id, email, displayName, studentId || null, realName || null, role, true);
-    const token = signUserToken(user);
-    res.status(201).json({ token, user });
+    const message = role === 'school' 
+      ? "校方注册申请已提交，等待管理员审核通过后方可登录" 
+      : "学生注册申请已提交，等待管理员审核通过后方可发布活动";
+    return res.status(201).json({ ok: true, message });
   } catch (e) {
     const status = e.status || 500;
     if (!e.status) console.error(e);
@@ -265,22 +276,22 @@ app.post("/api/auth/login", async (req, res) => {
   }
 
   try {
-    const users = await query("SELECT id, email, password_hash, display_name, student_id, real_name, role, school_approved FROM users WHERE email = ?", [email]);
+    const users = await query("SELECT id, email, password_hash, display_name, student_id, real_name, role, school_approved, avatar_url FROM users WHERE email = ?", [email]);
     if (users.length === 0) {
-      return res.status(401).json({ error: "邮箱或密码错误" });
+      return res.status(401).json({ error: "邮箱错误" });
     }
 
     const user = users[0];
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
-      return res.status(401).json({ error: "邮箱或密码错误" });
+      return res.status(401).json({ error: "密码错误" });
     }
 
     if (user.role === 'school' && !user.school_approved) {
       return res.status(403).json({ error: "您的校方账号正在审核中，请耐心等待管理员审核通过" });
     }
 
-    const publicUser = await userPublicFields(user.id, user.email, user.display_name, user.student_id, user.real_name, user.role, Boolean(user.school_approved));
+    const publicUser = await userPublicFields(user.id, user.email, user.display_name, user.student_id, user.real_name, user.role, Boolean(user.school_approved), user.avatar_url);
     const token = signUserToken(publicUser);
     res.json({ token, user: publicUser });
   } catch (e) {
@@ -292,13 +303,13 @@ app.post("/api/auth/login", async (req, res) => {
 // 获取当前用户信息
 app.get("/api/auth/me", authMiddleware(true), async (req, res) => {
   try {
-    const users = await query("SELECT id, email, display_name, student_id, real_name, role, school_approved FROM users WHERE id = ?", [req.user.id]);
+    const users = await query("SELECT id, email, display_name, student_id, real_name, role, school_approved, avatar_url FROM users WHERE id = ?", [req.user.id]);
     if (users.length === 0) {
       return res.status(404).json({ error: "用户不存在" });
     }
 
     const user = users[0];
-    const publicUser = await userPublicFields(user.id, user.email, user.display_name, user.student_id, user.real_name, user.role, Boolean(user.school_approved));
+    const publicUser = await userPublicFields(user.id, user.email, user.display_name, user.student_id, user.real_name, user.role, Boolean(user.school_approved), user.avatar_url);
     res.json({ user: publicUser });
   } catch (e) {
     console.error(e);
@@ -308,20 +319,68 @@ app.get("/api/auth/me", authMiddleware(true), async (req, res) => {
 
 app.put("/api/auth/me", authMiddleware(true), async (req, res) => {
   const displayName = String(req.body?.displayName || "").trim();
-  if (!displayName || displayName.length > 100) {
-    return res.status(400).json({ error: "昵称须为 1–100 字" });
+  const studentId = String(req.body?.studentId || "").trim();
+  if (!displayName || displayName.length > 10) {
+    return res.status(400).json({ error: "昵称须为 1–10 字" });
+  }
+  if (studentId && !/^\d{13}$/.test(studentId)) {
+    return res.status(400).json({ error: "学号必须是 13 位数字" });
   }
   try {
-    await query("UPDATE users SET display_name = ? WHERE id = ?", [displayName, req.user.id]);
-    const users = await query("SELECT email, student_id, real_name, role, school_approved FROM users WHERE id = ?", [req.user.id]);
+    const users = await query("SELECT email, display_name, student_id, real_name, role, school_approved, avatar_url FROM users WHERE id = ?", [req.user.id]);
+    const user = users[0];
+    const currentNickname = user.display_name;
+
+    // 检查昵称是否有变化
+    if (displayName !== currentNickname) {
+      // 检查是否是平台管理员
+      const adminCheck = await query("SELECT user_id FROM platform_admins WHERE user_id = ?", [req.user.id]);
+      const isPlatformAdmin = adminCheck.length > 0;
+      
+      // 管理员或校方直接修改
+      if (user.role === 'school' || isPlatformAdmin) {
+        await query("UPDATE users SET display_name = ? WHERE id = ?", [displayName, req.user.id]);
+      } else {
+        // 学生需要审核
+        // 检查是否有待审核的申请
+        const existingApprovals = await query(
+          "SELECT id FROM nickname_approvals WHERE user_id = ? AND status = 'pending'",
+          [req.user.id]
+        );
+        if (existingApprovals.length > 0) {
+          return res.status(400).json({ error: "您已有待审核的昵称修改申请，请等待审核完成" });
+        }
+
+        // 创建昵称审核记录
+        const approvalId = randomUUID();
+        await query(
+          "INSERT INTO nickname_approvals (id, user_id, current_nickname, requested_nickname, student_id, real_name, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+          [approvalId, req.user.id, currentNickname, displayName, user.student_id, user.real_name]
+        );
+
+        return res.json({
+          pending: true,
+          message: "昵称修改申请已提交，请等待管理员审核"
+        });
+      }
+    }
+
+    // 更新学号（如果提供了且有变化）
+    if (studentId && studentId !== (user.student_id || "")) {
+      await query("UPDATE users SET student_id = ? WHERE id = ?", [studentId, req.user.id]);
+    }
+
+    const updatedUsers = await query("SELECT email, display_name, student_id, real_name, role, school_approved, avatar_url FROM users WHERE id = ?", [req.user.id]);
+    const updatedUser = updatedUsers[0];
     const publicUser = await userPublicFields(
       req.user.id,
-      users[0].email,
-      displayName,
-      users[0].student_id,
-      users[0].real_name,
-      users[0].role,
-      Boolean(users[0].school_approved)
+      updatedUser.email,
+      updatedUser.display_name,
+      updatedUser.student_id,
+      updatedUser.real_name,
+      updatedUser.role,
+      Boolean(updatedUser.school_approved),
+      updatedUser.avatar_url
     );
     res.json({ user: publicUser });
   } catch (e) {
@@ -825,8 +884,15 @@ app.delete("/api/me/favorites", authMiddleware(true), async (req, res) => {
 // 报名活动
 app.post("/api/activities/:id/register", authMiddleware(true), async (req, res) => {
   try {
-    const activities = await query("SELECT id FROM activities WHERE id = ?", [req.params.id]);
+    const activities = await query("SELECT id, end_at FROM activities WHERE id = ?", [req.params.id]);
     if (activities.length === 0) return res.status(404).json({ error: "活动不存在" });
+
+    // 检查活动是否已过期
+    const activity = activities[0];
+    const now = new Date();
+    if (activity.end_at && new Date(activity.end_at) < now) {
+      return res.status(400).json({ error: "活动已过期，无法报名" });
+    }
 
     const existing = await query(
       "SELECT id FROM activity_registrations WHERE user_id = ? AND activity_id = ?",
@@ -1059,15 +1125,6 @@ app.delete("/api/admin/users/:id", authMiddleware(true), adminOnly, async (req, 
   try {
     const targetId = req.params.id;
 
-    if (targetId === req.user.id) {
-      return res.status(403).json({ error: "不能删除自己" });
-    }
-
-    const admins = await query("SELECT user_id FROM platform_admins WHERE user_id = ?", [targetId]);
-    if (admins.length > 0) {
-      return res.status(403).json({ error: "不能删除平台管理员" });
-    }
-
     const users = await query("SELECT id FROM users WHERE id = ?", [targetId]);
     if (users.length === 0) {
       return res.status(404).json({ error: "用户不存在" });
@@ -1084,15 +1141,17 @@ app.delete("/api/admin/users/:id", authMiddleware(true), adminOnly, async (req, 
 app.get("/api/admin/school-registrations", authMiddleware(true), adminOnly, async (req, res) => {
   try {
     const rows = await query(`
-      SELECT id, email, display_name, role, school_approved, created_at
+      SELECT id, email, display_name, student_id, real_name, role, school_approved, created_at
       FROM users
-      WHERE role = 'school'
+      WHERE role IN ('school', 'student') AND school_approved = 0
       ORDER BY created_at DESC
     `);
     const requests = rows.map((row) => ({
       id: row.id,
       email: row.email,
       displayName: row.display_name,
+      studentId: row.student_id || null,
+      realName: row.real_name || null,
       role: row.role,
       schoolApproved: Boolean(row.school_approved),
       createdAt: row.created_at,
@@ -1100,7 +1159,7 @@ app.get("/api/admin/school-registrations", authMiddleware(true), adminOnly, asyn
     res.json({ requests });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: "获取校方注册列表失败" });
+    return res.status(500).json({ error: "获取注册列表失败" });
   }
 });
 
@@ -1110,13 +1169,29 @@ app.put("/api/admin/school-registrations/:id/approve", authMiddleware(true), adm
     if (users.length === 0) {
       return res.status(404).json({ error: "用户不存在" });
     }
-    if (users[0].role !== 'school') {
-      return res.status(400).json({ error: "该用户不是校方账号" });
-    }
     if (users[0].school_approved) {
       return res.status(400).json({ error: "该账号已通过审核" });
     }
     await query("UPDATE users SET school_approved = 1 WHERE id = ?", [req.params.id]);
+
+    const userId = req.params.id;
+    const makeAdmin = Boolean(req.body?.makeAdmin);
+    const userRole = users[0].role;
+    // 安全检查：只有校方账号才能被授予管理员权限
+    if (makeAdmin && userRole !== "school") {
+      return res.status(400).json({ error: "只有校方账号才能被授予管理员权限" });
+    }
+    if (makeAdmin) {
+      const existingAdmins = await query("SELECT user_id FROM platform_admins WHERE user_id = ?", [userId]);
+      if (existingAdmins.length === 0) {
+        await query("INSERT INTO platform_admins (user_id, note, created_at) VALUES (?, ?, ?)", [
+          userId,
+          "审核通过时授予管理员权限",
+          mysqlDateTime3()
+        ]);
+      }
+    }
+
     res.json({ ok: true });
   } catch (e) {
     console.error(e);
@@ -1130,9 +1205,6 @@ app.put("/api/admin/school-registrations/:id/reject", authMiddleware(true), admi
     if (users.length === 0) {
       return res.status(404).json({ error: "用户不存在" });
     }
-    if (users[0].role !== 'school') {
-      return res.status(400).json({ error: "该用户不是校方账号" });
-    }
     if (users[0].school_approved) {
       return res.status(400).json({ error: "该账号已通过审核，无法拒绝" });
     }
@@ -1141,6 +1213,180 @@ app.put("/api/admin/school-registrations/:id/reject", authMiddleware(true), admi
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "拒绝失败" });
+  }
+});
+
+app.post("/api/avatar", authMiddleware(true), async (req, res) => {
+  const body = req.body || {};
+  const base64Data = String(body.data || "");
+  
+  if (!base64Data) {
+    return res.status(400).json({ error: "请上传头像图片" });
+  }
+  
+  const match = base64Data.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/);
+  if (!match) {
+    return res.status(400).json({ error: "无效的图片格式，仅支持 PNG、JPG、WebP" });
+  }
+  
+  const imageData = Buffer.from(match[2], "base64");
+  if (imageData.length > 2 * 1024 * 1024) {
+    return res.status(400).json({ error: "图片大小不能超过 2MB" });
+  }
+  
+  const ext = match[1] === "jpeg" ? "jpg" : match[1];
+  const fileName = `${req.user.id}-${Date.now()}.${ext}`;
+  const absolutePath = path.join(uploadsDir, fileName);
+  const filePath = `/uploads/avatars/${fileName}`;
+  
+  writeFileSync(absolutePath, imageData);
+  
+  const id = randomUUID();
+  await query("INSERT INTO avatar_approvals (id, user_id, file_path) VALUES (?, ?, ?)", [id, req.user.id, filePath]);
+  
+  res.json({ id, status: "pending", message: "头像已提交审核，请等待管理员通过" });
+});
+
+app.get("/api/avatar/status", authMiddleware(true), async (req, res) => {
+  const approvals = await query("SELECT id, status, created_at FROM avatar_approvals WHERE user_id = ? ORDER BY created_at DESC LIMIT 1", [req.user.id]);
+  
+  if (approvals.length === 0) {
+    return res.json({ status: "none" });
+  }
+  
+  const row = approvals[0];
+  res.json({
+    id: row.id,
+    status: row.status,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString()
+  });
+});
+
+app.get("/api/admin/avatar-approvals", authMiddleware(true), adminOnly, async (req, res) => {
+  const rows = await query(`
+    SELECT aa.id, aa.user_id, aa.file_path, aa.status, aa.created_at,
+           u.email, u.display_name
+    FROM avatar_approvals aa
+    JOIN users u ON u.id = aa.user_id
+    WHERE aa.status = 'pending'
+    ORDER BY aa.created_at DESC
+  `);
+  
+  res.json({
+    approvals: rows.map(row => ({
+      id: row.id,
+      userId: row.user_id,
+      filePath: row.file_path,
+      status: row.status,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
+      user: {
+        email: row.email,
+        displayName: row.display_name
+      }
+    }))
+  });
+});
+
+app.put("/api/admin/avatar-approvals/:id", authMiddleware(true), adminOnly, async (req, res) => {
+  const body = req.body || {};
+  const action = String(body.action || "").toLowerCase();
+  
+  if (action !== "approve" && action !== "reject") {
+    return res.status(400).json({ error: "无效的操作，仅支持 approve 或 reject" });
+  }
+  
+  const approvals = await query("SELECT id, user_id, file_path, status FROM avatar_approvals WHERE id = ? LIMIT 1", [req.params.id]);
+  
+  if (approvals.length === 0) {
+    return res.status(404).json({ error: "未找到头像审核记录" });
+  }
+  
+  const row = approvals[0];
+  if (row.status !== "pending") {
+    return res.status(400).json({ error: "该头像已处理过" });
+  }
+  
+  const status = action === "approve" ? "approved" : "rejected";
+  
+  if (action === "approve") {
+    await query("UPDATE users SET avatar_url = ? WHERE id = ?", [row.file_path, row.user_id]);
+  }
+  
+  await query("UPDATE avatar_approvals SET status = ?, reviewer_id = ?, reviewed_at = NOW() WHERE id = ?", [status, req.user.id, req.params.id]);
+  
+  res.json({ success: true, status });
+});
+
+// 获取昵称审核列表
+app.get("/api/admin/nickname-approvals", authMiddleware(true), adminOnly, async (req, res) => {
+  try {
+    const rows = await query(`
+      SELECT 
+        na.id, na.user_id, na.current_nickname, na.requested_nickname,
+        na.student_id, na.real_name, na.status, na.reviewer_id,
+        na.reviewed_at, na.created_at,
+        u.email as user_email
+      FROM nickname_approvals na
+      JOIN users u ON na.user_id = u.id
+      WHERE na.status = 'pending'
+      ORDER BY na.created_at DESC
+    `);
+    
+    // 转换为驼峰命名
+    const approvals = rows.map(row => ({
+      id: row.id,
+      userId: row.user_id,
+      currentNickname: row.current_nickname,
+      requestedNickname: row.requested_nickname,
+      studentId: row.student_id,
+      realName: row.real_name,
+      status: row.status,
+      reviewerId: row.reviewer_id,
+      reviewedAt: row.reviewed_at,
+      createdAt: row.created_at,
+      userEmail: row.user_email
+    }));
+    
+    res.json({ approvals });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "获取审核列表失败" });
+  }
+});
+
+// 处理昵称审核
+app.put("/api/admin/nickname-approvals/:id", authMiddleware(true), adminOnly, async (req, res) => {
+  const body = req.body || {};
+  const action = String(body.action || "").toLowerCase();
+  
+  if (action !== "approve" && action !== "reject") {
+    return res.status(400).json({ error: "无效的操作，仅支持 approve 或 reject" });
+  }
+  
+  try {
+    const approvals = await query("SELECT * FROM nickname_approvals WHERE id = ?", [req.params.id]);
+    if (approvals.length === 0) {
+      return res.status(404).json({ error: "审核记录不存在" });
+    }
+    
+    const row = approvals[0];
+    if (row.status !== "pending") {
+      return res.status(400).json({ error: "该申请已处理过" });
+    }
+    
+    const status = action === "approve" ? "approved" : "rejected";
+    
+    if (action === "approve") {
+      // 更新用户昵称
+      await query("UPDATE users SET display_name = ? WHERE id = ?", [row.requested_nickname, row.user_id]);
+    }
+    
+    await query("UPDATE nickname_approvals SET status = ?, reviewer_id = ?, reviewed_at = NOW() WHERE id = ?", [status, req.user.id, req.params.id]);
+    
+    res.json({ success: true, status });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "处理审核失败" });
   }
 });
 
@@ -1153,6 +1399,49 @@ async function start() {
   }
 
   await initDatabase();
+  
+  // 创建测试学生账号
+  try {
+    const testEmail = '111@qq.com';
+    const existingUsers = await query("SELECT id FROM users WHERE email = ?", [testEmail]);
+    if (existingUsers.length === 0) {
+      const id = randomUUID();
+      const passwordHash = await bcrypt.hash('123456', SALT_ROUNDS);
+      const now = mysqlDateTime3();
+      await query(
+        "INSERT INTO users (id, email, password_hash, display_name, student_id, real_name, role, school_approved, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [id, testEmail, passwordHash, '测试学生', '1111111111111', '测试姓名', 'student', 1, now]
+      );
+      console.log(`✅ 测试学生账号已创建: ${testEmail} / 123456`);
+    } else {
+      console.log('ℹ️ 测试学生账号已存在');
+    }
+  } catch (e) {
+    console.error('⚠️ 创建测试账号失败:', e.message);
+  }
+  
+  // 自动清理过期活动（结束超过3天的活动）
+  async function cleanupExpiredActivities() {
+    try {
+      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+      const result = await query(
+        "DELETE FROM activities WHERE end_at IS NOT NULL AND end_at < ?",
+        [mysqlDateTime3(threeDaysAgo)]
+      );
+      const deleted = result?.affectedRows ?? 0;
+      if (deleted > 0) {
+        console.log(`🗑️ 已自动删除 ${deleted} 个过期活动`);
+      }
+    } catch (e) {
+      console.error('⚠️ 清理过期活动失败:', e.message);
+    }
+  }
+  
+  // 启动时清理一次
+  cleanupExpiredActivities();
+  // 每小时检查一次
+  setInterval(cleanupExpiredActivities, 60 * 60 * 1000);
+  
   app.listen(PORT, () => {
     console.log(`🚀 校园活动API服务器运行在 http://localhost:${PORT}`);
     console.log(`📊 数据库: ${process.env.MYSQL_DATABASE || 'program'}`);

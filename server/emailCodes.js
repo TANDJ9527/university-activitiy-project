@@ -18,24 +18,40 @@ async function sendMail(email, code, purpose) {
   const subject = `【校园活动】验证码：${code}`;
   const text = `您的验证码为 ${code}，用于${PURPOSE_LABEL[purpose] || "验证"}，10 分钟内有效。如非本人操作请忽略。`;
 
+  console.log(`[邮件发送] SMTP配置检查:`, {
+    host: process.env.SMTP_HOST,
+    user: process.env.SMTP_USER,
+    port: process.env.SMTP_PORT,
+    secure: process.env.SMTP_SECURE,
+    hasPass: !!process.env.SMTP_PASS
+  });
+
   if (process.env.SMTP_HOST && process.env.SMTP_USER) {
-    const nodemailer = await import("nodemailer");
-    const transporter = nodemailer.default.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 465,
-      secure: process.env.SMTP_SECURE !== "0",
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS || "",
-      },
-    });
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: email,
-      subject,
-      text,
-    });
-    return;
+    try {
+      const nodemailer = await import("nodemailer");
+      const transporter = nodemailer.default.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT) || 465,
+        secure: process.env.SMTP_SECURE !== "0",
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS || "",
+        },
+      });
+      console.log(`[邮件发送] 开始发送邮件到 ${email}`);
+      const info = await transporter.sendMail({
+        from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        to: email,
+        subject,
+        text,
+      });
+      console.log(`[邮件发送] 发送成功:`, info.messageId);
+      return;
+    } catch (error) {
+      console.error(`[邮件发送] 发送失败:`, error.message);
+      console.log(`[邮箱验证码] ${email} (${purpose}): ${code}`);
+      return;
+    }
   }
 
   console.log(`[邮箱验证码] ${email} (${purpose}): ${code}`);

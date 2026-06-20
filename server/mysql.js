@@ -187,6 +187,59 @@ async function initDatabase() {
       if (!/Duplicate column/i.test(msg)) throw e;
     }
 
+    try {
+      await query(`
+        ALTER TABLE users
+        ADD COLUMN student_id VARCHAR(20) NULL
+        AFTER display_name
+      `);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/Duplicate column/i.test(msg)) throw e;
+    }
+
+    try {
+      await query(`
+        ALTER TABLE users
+        ADD COLUMN real_name VARCHAR(50) NULL
+        AFTER student_id
+      `);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/Duplicate column/i.test(msg)) throw e;
+    }
+
+    try {
+      await query(`
+        ALTER TABLE users
+        ADD COLUMN avatar_url VARCHAR(500) NULL
+        AFTER real_name
+      `);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/Duplicate column/i.test(msg)) throw e;
+    }
+
+    // 创建昵称审核表
+    await query(`
+      CREATE TABLE IF NOT EXISTS nickname_approvals (
+        id CHAR(36) NOT NULL PRIMARY KEY,
+        user_id CHAR(36) NOT NULL,
+        current_nickname VARCHAR(100) NOT NULL,
+        requested_nickname VARCHAR(100) NOT NULL,
+        student_id VARCHAR(20) NULL,
+        real_name VARCHAR(50) NULL,
+        status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+        reviewer_id CHAR(36) NULL,
+        reviewed_at DATETIME(3) NULL,
+        created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        KEY idx_nickname_status (status),
+        KEY idx_nickname_user (user_id),
+        CONSTRAINT fk_nickname_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_nickname_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+
     console.log('✅ 数据库表结构初始化完成');
   } catch (error) {
     console.error('❌ 数据库初始化失败:', error);

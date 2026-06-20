@@ -69,12 +69,13 @@ export function ActivitySearch() {
 
       <div className="mb-8 flex flex-col gap-4 rounded-2xl border border-white/70 bg-white/70 p-4 shadow-md shadow-slate-900/5 ring-1 ring-slate-200/60 backdrop-blur-md sm:flex-row sm:flex-wrap sm:items-end">
         <label className="flex min-w-[200px] flex-1 flex-col gap-1.5 text-sm">
-          <span className="font-semibold text-slate-700">关键词</span>
+          <span className="font-semibold text-slate-700">关键词（不超过10字）</span>
           <input
             type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="标题、地点、主办方…"
+            placeholder="搜索活动"
+            maxLength={10}
             className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 text-slate-900 shadow-inner shadow-slate-900/5 ring-1 ring-slate-200/90 outline-none transition placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-400/40"
           />
         </label>

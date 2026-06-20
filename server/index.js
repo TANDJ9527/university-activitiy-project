@@ -13,7 +13,7 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "1mb" }));
 
-async function userPublicFields(userId, email, displayName, role) {
+async function userPublicFields(userId, email, displayName, role, avatarUrl) {
   const [pa] = await pool.execute(
     "SELECT 1 AS ok FROM platform_admins WHERE user_id = ? LIMIT 1",
     [userId]
@@ -23,6 +23,7 @@ async function userPublicFields(userId, email, displayName, role) {
     email,
     displayName,
     role,
+    avatarUrl: avatarUrl || null,
     isPlatformAdmin: pa.length > 0,
   };
 }
@@ -124,27 +125,27 @@ app.post("/api/auth/login", async (req, res) => {
   }
 
   const [rows] = await pool.execute(
-    "SELECT id, email, password_hash AS passwordHash, display_name AS displayName, role FROM users WHERE email = ? LIMIT 1",
+    "SELECT id, email, password_hash AS passwordHash, display_name AS displayName, role, avatar_url AS avatarUrl FROM users WHERE email = ? LIMIT 1",
     [email]
   );
   const row = rows[0];
-  if (!row) return res.status(401).json({ error: "邮箱或密码错误" });
+  if (!row) return res.status(401).json({ error: "邮箱错误" });
 
   const ok = await bcrypt.compare(password, row.passwordHash);
-  if (!ok) return res.status(401).json({ error: "邮箱或密码错误" });
+  if (!ok) return res.status(401).json({ error: "密码错误" });
 
-  const user = await userPublicFields(row.id, row.email, row.displayName, row.role);
+  const user = await userPublicFields(row.id, row.email, row.displayName, row.role, row.avatarUrl);
   res.json({ token: signUserToken(user), user });
 });
 
 app.get("/api/auth/me", authMiddleware(true), async (req, res) => {
   const [rows] = await pool.execute(
-    "SELECT id, email, display_name AS displayName, role FROM users WHERE id = ? LIMIT 1",
+    "SELECT id, email, display_name AS displayName, role, avatar_url AS avatarUrl FROM users WHERE id = ? LIMIT 1",
     [req.user.id]
   );
   const row = rows[0];
   if (!row) return res.status(404).json({ error: "用户不存在" });
-  const user = await userPublicFields(row.id, row.email, row.displayName, row.role);
+  const user = await userPublicFields(row.id, row.email, row.displayName, row.role, row.avatarUrl);
   res.json({ user });
 });
 
@@ -361,6 +362,129 @@ app.delete("/api/activities/:id", authMiddleware(true), async (req, res) => {
 
   await pool.execute("DELETE FROM activities WHERE id = ?", [req.params.id]);
   res.status(204).send();
+});
+
+app.post("/api/avatar", authMiddleware(true), async (req, res) => {
+  const body = req.body || {};
+  const base64Data = String(body.data || "");
+  
+  if (!base64Data) {
+    return res.status(400).json({ error: "请上传头像图片" });
+  }
+  
+  const match = base64Data.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/);
+  if (!match) {
+    return res.status(400).json({ error: "无效的图片格式，仅支持 PNG、JPG、WebP" });
+  }
+  
+  const imageData = Buffer.from(match[2], "base64");
+  if (imageData.length > 2 * 1024 * 1024) {
+    return res.status(400).json({ error: "图片大小不能超过 2MB" });
+  }
+  
+  const ext = match[1] === "jpeg" ? "jpg" : match[1];
+  const fileName = `${req.user.id}-${Date.now()}.${ext}`;
+  const filePath = `/uploads/avatars/${fileName}`;
+  
+  const id = randomUUID();
+  await pool.execute(
+    "INSERT INTO avatar_approvals (id, user_id, file_path) VALUES (?, ?, ?)",
+    [id, req.user.id, filePath]
+  );
+  
+  res.json({ id, status: "pending", message: "头像已提交审核，请等待管理员通过" });
+});
+
+app.get("/api/avatar/status", authMiddleware(true), async (req, res) => {
+  const [rows] = await pool.execute(
+    "SELECT id, status, created_at FROM avatar_approvals WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+    [req.user.id]
+  );
+  
+  if (rows.length === 0) {
+    return res.json({ status: "none" });
+  }
+  
+  const row = rows[0];
+  res.json({
+    id: row.id,
+    status: row.status,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString()
+  });
+});
+
+app.get("/api/admin/avatar-approvals", authMiddleware(true), async (req, res) => {
+  const admin = await isPlatformAdmin(req.user.id);
+  if (!admin) {
+    return res.status(403).json({ error: "权限不足" });
+  }
+  
+  const [rows] = await pool.execute(
+    `SELECT aa.id, aa.user_id, aa.file_path, aa.status, aa.created_at,
+            u.email, u.display_name AS displayName
+     FROM avatar_approvals aa
+     JOIN users u ON u.id = aa.user_id
+     WHERE aa.status = 'pending'
+     ORDER BY aa.created_at DESC`
+  );
+  
+  res.json({
+    approvals: rows.map(row => ({
+      id: row.id,
+      userId: row.user_id,
+      filePath: row.file_path,
+      status: row.status,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
+      user: {
+        email: row.email,
+        displayName: row.displayName
+      }
+    }))
+  });
+});
+
+app.put("/api/admin/avatar-approvals/:id", authMiddleware(true), async (req, res) => {
+  const admin = await isPlatformAdmin(req.user.id);
+  if (!admin) {
+    return res.status(403).json({ error: "权限不足" });
+  }
+  
+  const body = req.body || {};
+  const action = String(body.action || "").toLowerCase();
+  
+  if (action !== "approve" && action !== "reject") {
+    return res.status(400).json({ error: "无效的操作，仅支持 approve 或 reject" });
+  }
+  
+  const [rows] = await pool.execute(
+    "SELECT id, user_id, file_path, status FROM avatar_approvals WHERE id = ? LIMIT 1",
+    [req.params.id]
+  );
+  
+  const row = rows[0];
+  if (!row) {
+    return res.status(404).json({ error: "未找到头像审核记录" });
+  }
+  
+  if (row.status !== "pending") {
+    return res.status(400).json({ error: "该头像已处理过" });
+  }
+  
+  const status = action === "approve" ? "approved" : "rejected";
+  
+  if (action === "approve") {
+    await pool.execute(
+      "UPDATE users SET avatar_url = ? WHERE id = ?",
+      [row.file_path, row.user_id]
+    );
+  }
+  
+  await pool.execute(
+    "UPDATE avatar_approvals SET status = ?, reviewer_id = ?, reviewed_at = NOW() WHERE id = ?",
+    [status, req.user.id, req.params.id]
+  );
+  
+  res.json({ success: true, status });
 });
 
 async function start() {

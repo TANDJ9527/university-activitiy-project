@@ -77,7 +77,7 @@ export async function fetchMe(): Promise<AuthUser> {
   return data.user
 }
 
-export async function updateMe(body: { displayName: string }): Promise<AuthUser> {
+export async function updateMe(body: { displayName: string; studentId?: string }): Promise<AuthUser> {
   const res = await fetch('/api/auth/me', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -371,10 +371,11 @@ export async function listSchoolRegistrations(): Promise<SchoolRegistration[]> {
   return data.requests ?? []
 }
 
-export async function approveSchoolRegistration(userId: string): Promise<void> {
+export async function approveSchoolRegistration(userId: string, makeAdmin?: boolean): Promise<void> {
   const res = await fetch(`/api/admin/school-registrations/${encodeURIComponent(userId)}/approve`, {
     method: 'PUT',
-    headers: { ...authHeaders() },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ makeAdmin: makeAdmin || false }),
   })
   if (!res.ok) throw new Error(await parseError(res))
 }
@@ -385,4 +386,98 @@ export async function rejectSchoolRegistration(userId: string): Promise<void> {
     headers: { ...authHeaders() },
   })
   if (!res.ok) throw new Error(await parseError(res))
+}
+
+export async function uploadAvatar(data: string): Promise<{ id: string; status: string; message: string }> {
+  const res = await fetch('/api/avatar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ data }),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ id: string; status: string; message: string }>
+}
+
+export async function getAvatarStatus(): Promise<{ id?: string; status: string; createdAt?: string }> {
+  const res = await fetch('/api/avatar/status', { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ id?: string; status: string; createdAt?: string }>
+}
+
+export interface AvatarApproval {
+  id: string
+  userId: string
+  filePath: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: string
+  user: {
+    email: string
+    displayName: string
+  }
+}
+
+export async function listAvatarApprovals(): Promise<AvatarApproval[]> {
+  const res = await fetch('/api/admin/avatar-approvals', { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = (await res.json()) as { approvals?: AvatarApproval[] }
+  return data.approvals ?? []
+}
+
+export async function approveAvatar(id: string): Promise<{ success: boolean; status: string }> {
+  const res = await fetch(`/api/admin/avatar-approvals/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ action: 'approve' }),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ success: boolean; status: string }>
+}
+
+export async function rejectAvatar(id: string): Promise<{ success: boolean; status: string }> {
+  const res = await fetch(`/api/admin/avatar-approvals/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ action: 'reject' }),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ success: boolean; status: string }>
+}
+
+export interface NicknameApproval {
+  id: string
+  userId: string
+  currentNickname: string
+  requestedNickname: string
+  studentId: string | null
+  realName: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  userEmail: string
+  createdAt: string
+}
+
+export async function listNicknameApprovals(): Promise<NicknameApproval[]> {
+  const res = await fetch('/api/admin/nickname-approvals', { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(await parseError(res))
+  const data = (await res.json()) as { approvals?: NicknameApproval[] }
+  return data.approvals ?? []
+}
+
+export async function approveNickname(id: string): Promise<{ success: boolean; status: string }> {
+  const res = await fetch(`/api/admin/nickname-approvals/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ action: 'approve' }),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ success: boolean; status: string }>
+}
+
+export async function rejectNickname(id: string): Promise<{ success: boolean; status: string }> {
+  const res = await fetch(`/api/admin/nickname-approvals/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ action: 'reject' }),
+  })
+  if (!res.ok) throw new Error(await parseError(res))
+  return res.json() as Promise<{ success: boolean; status: string }>
 }

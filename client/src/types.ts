@@ -61,6 +61,8 @@ export interface AuthUser {
   realName: string | null
   role: UserRole
   isPlatformAdmin: boolean
+  schoolApproved: boolean
+  avatarUrl: string | null
 }
 
 export type CommentStatus = 'pending' | 'approved' | 'rejected'

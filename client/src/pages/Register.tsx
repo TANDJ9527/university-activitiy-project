@@ -23,6 +23,7 @@ export function Register() {
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [cooldown, setCooldown] = useState(0)
+  const [codeInputEnabled, setCodeInputEnabled] = useState(false)
 
   useEffect(() => {
     if (ready && user) navigate('/', { replace: true })
@@ -38,8 +39,10 @@ export function Register() {
     setSending(true)
     try {
       const res = await sendEmailCode(e, 'register')
-      showToast(res.message || '验证码已发送', 'success')
+      const toastMsg = res.devCode ? `${res.message || '验证码已发送'}（开发模式：${res.devCode}）` : (res.message || '验证码已发送')
+      showToast(toastMsg, 'success')
       setCooldown(60)
+      setCodeInputEnabled(true)
       const t = window.setInterval(() => {
         setCooldown((c) => {
           if (c <= 1) {
@@ -68,13 +71,33 @@ export function Register() {
       setErr('请填写邮箱验证码')
       return
     }
+    if (!displayName.trim()) {
+      setErr('请填写昵称/组织名称')
+      return
+    }
+    if (displayName.length > 10) {
+      setErr('昵称/组织名称不能超过 10 个字')
+      return
+    }
+    if (password.length > 20) {
+      setErr('密码不能超过 20 位')
+      return
+    }
     if (role === 'student') {
       if (!studentId.trim()) {
         setErr('请填写学号')
         return
       }
+      if (!/^\d{13}$/.test(studentId.trim())) {
+        setErr('学号必须是 13 位数字')
+        return
+      }
       if (!realName.trim()) {
         setErr('请填写真实姓名')
+        return
+      }
+      if (realName.length > 10) {
+        setErr('真实姓名不能超过 10 个字')
         return
       }
     }
@@ -147,11 +170,11 @@ export function Register() {
               <span className="mb-1.5 block text-sm font-semibold text-slate-700">学号</span>
               <input
                 required
-                maxLength={50}
+                maxLength={13}
                 name="register-student-id"
-                placeholder="请输入学号"
+                placeholder="13位数字学号"
                 value={studentId}
-                onChange={(ev) => setStudentId(ev.target.value)}
+                onChange={(ev) => setStudentId(ev.target.value.replace(/\D/g, ''))}
                 {...antiAutofillInputProps}
                 className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
               />
@@ -161,9 +184,9 @@ export function Register() {
               <span className="mb-1.5 block text-sm font-semibold text-slate-700">真实姓名</span>
               <input
                 required
-                maxLength={100}
+                maxLength={10}
                 name="register-real-name"
-                placeholder="请输入真实姓名"
+                placeholder="不超过10个字"
                 value={realName}
                 onChange={(ev) => setRealName(ev.target.value)}
                 {...antiAutofillInputProps}
@@ -177,8 +200,9 @@ export function Register() {
           <span className="mb-1.5 block text-sm font-semibold text-slate-700">昵称 / 组织名称</span>
           <input
             required
-            maxLength={100}
+            maxLength={10}
             name="register-display-name"
+            placeholder="不超过10个字"
             value={displayName}
             onChange={(ev) => setDisplayName(ev.target.value)}
             {...antiAutofillInputProps}
@@ -206,10 +230,18 @@ export function Register() {
             <input
               required
               maxLength={6}
-              name="register-verification-code"
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              readOnly={!codeInputEnabled}
+              onFocus={(e) => {
+                if (codeInputEnabled) {
+                  e.currentTarget.readOnly = false
+                }
+              }}
               value={code}
               onChange={(ev) => setCode(ev.target.value.replace(/\D/g, ''))}
-              {...antiAutofillInputProps}
               className="w-full rounded-xl border-0 bg-white/95 px-4 py-2.5 shadow-inner ring-1 ring-slate-200/90 outline-none focus:ring-2 focus:ring-indigo-400/40"
             />
           </label>
@@ -224,12 +256,13 @@ export function Register() {
         </div>
 
         <label className="block">
-          <span className="mb-1.5 block text-sm font-semibold text-slate-700">密码（至少 6 位）</span>
+          <span className="mb-1.5 block text-sm font-semibold text-slate-700">密码（6-20 位）</span>
           <input
             type="password"
             name="register-password"
             required
             minLength={6}
+            maxLength={20}
             value={password}
             onChange={(ev) => setPassword(ev.target.value)}
             {...antiAutofillInputProps}

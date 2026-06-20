@@ -7,7 +7,7 @@ export function Login() {
   const { login, user, ready } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const from = (location.state as { from?: string } | null)?.from || '/'
+  const from = '/' // 登录成功后跳转到活动广场（主页）
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
